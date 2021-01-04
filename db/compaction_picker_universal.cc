@@ -843,7 +843,7 @@ Compaction* UniversalCompactionPicker::PickCompactionToReduceSortedRunsOld(
       for (size_t i = loop;
            i < loop + candidate_count && i < sorted_runs.size(); i++) {
         const SortedRun* skipping_sr = &sorted_runs[i];
-        char file_num_buf[256];
+        char file_num_buf[512];
         skipping_sr->DumpSizeInfo(file_num_buf, sizeof(file_num_buf), loop);
         ROCKS_LOG_BUFFER(log_buffer, "[%s] Universal: Skipping %s",
                          cf_name.c_str(), file_num_buf);
@@ -913,7 +913,7 @@ Compaction* UniversalCompactionPicker::PickCompactionToReduceSortedRunsOld(
         files.push_back(f);
       }
     }
-    char file_num_buf[256];
+    char file_num_buf[512];
     picking_sr.DumpSizeInfo(file_num_buf, sizeof(file_num_buf), i);
     ROCKS_LOG_BUFFER(log_buffer, "[%s] Universal: Picking %s", cf_name.c_str(),
                      file_num_buf);
@@ -1057,7 +1057,7 @@ Compaction* UniversalCompactionPicker::PickCompactionToReduceSizeAmp(
         files.push_back(f);
       }
     }
-    char file_num_buf[256];
+    char file_num_buf[512];
     picking_sr.DumpSizeInfo(file_num_buf, sizeof(file_num_buf), loop);
     ROCKS_LOG_BUFFER(log_buffer, "[%s] Universal: size amp picking %s",
                      cf_name.c_str(), file_num_buf);
@@ -1406,7 +1406,7 @@ Compaction* UniversalCompactionPicker::PickCompactionToReduceSortedRuns(
   for (size_t i = 0; i < inputs.size(); ++i) {
     inputs[i].level = start_level + static_cast<int>(i);
   }
-  char file_num_buf[kFormatFileNumberBufSize];
+  char file_num_buf[512];
   for (size_t i = start_index; i < end_index; i++) {
     auto& picking_sr = sorted_runs[i];
     if (picking_sr.level == 0) {

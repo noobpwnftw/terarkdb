@@ -836,7 +836,7 @@ void CompactionIterator::PrepareOutput() {
         status_ = std::move(s);
       }
       // Not supported, fallback to combine the value ...
-    } else if (do_combine_value_) {
+    } else if (do_combine_value_ || blob_config_.blob_size == size_t(-1)) {
       ikey_.type = ikey_.type == kTypeValueIndex ? kTypeValue : kTypeMerge;
       current_key_.UpdateInternalKey(ikey_.sequence, ikey_.type);
       zero_sequence();
