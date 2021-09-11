@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# WITH_TESTS=1 ./build_cmake.sh
+# WITH_TESTS=1 ./build.sh
 #
 
 BASE=$PWD

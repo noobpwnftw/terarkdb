@@ -1,16 +1,26 @@
 #pragma once
 
-#include <chrono>
+#include <inttypes.h>
+
 #include <cstddef>
+#include <memory>
 #include <string>
 
-#include "rocksdb/env.h"
 #include "rocksdb/terark_namespace.h"
 
 namespace TERARKDB_NAMESPACE {
+
+class Env;
+class Logger;
+
 class HistReporterHandle {
  public:
   HistReporterHandle() = default;
+
+  virtual const char* GetName() = 0;
+  virtual const char* GetTag() = 0;
+  virtual Logger* GetLogger() = 0;
+  virtual Env* GetEnv() = 0;
 
   virtual ~HistReporterHandle() = default;
 
@@ -20,22 +30,26 @@ class HistReporterHandle {
 
 class LatencyHistGuard {
  public:
-  explicit LatencyHistGuard(HistReporterHandle* handle)
-      : handle_(handle),
-        begin_time_(std::chrono::high_resolution_clock::now()) {}
+  explicit LatencyHistGuard(HistReporterHandle* handle);
 
-  ~LatencyHistGuard() {
-    if (handle_ != nullptr) {
-      auto us = std::chrono::duration_cast<std::chrono::microseconds>(
-                    std::chrono::high_resolution_clock::now() - begin_time_)
-                    .count();
-      handle_->AddRecord(us);
-    }
-  }
+  ~LatencyHistGuard();
 
  private:
   HistReporterHandle* handle_;
-  decltype(std::chrono::high_resolution_clock::now()) begin_time_;
+  uint64_t begin_time_ns_;
+};
+
+class LatencyHistLoggedGuard {
+ public:
+  explicit LatencyHistLoggedGuard(HistReporterHandle* handle,
+                                  uint64_t threshold_us = 500 * 1000);
+  ~LatencyHistLoggedGuard();
+
+ private:
+  HistReporterHandle* handle_;
+  uint64_t begin_time_ns_;
+  uint64_t log_threshold_us_;
+  void* start_stacktrace_;
 };
 
 class CountReporterHandle {
@@ -57,10 +71,37 @@ class MetricsReporterFactory {
  public:
   virtual HistReporterHandle* BuildHistReporter(const std::string& name,
                                                 const std::string& tags,
-                                                Logger* log) = 0;
+                                                Logger* logger,
+                                                Env* const env) = 0;
 
   virtual CountReporterHandle* BuildCountReporter(const std::string& name,
                                                   const std::string& tags,
-                                                  Logger* log) = 0;
+                                                  Logger* logger,
+                                                  Env* const env) = 0;
 };
+
+// curried -> https://en.wikipedia.org/wiki/Currying
+class CurriedMetricsReporterFactory {
+  std::shared_ptr<MetricsReporterFactory> factory_;
+  Logger* logger_;
+  Env* const env_;
+
+ public:
+  CurriedMetricsReporterFactory(std::shared_ptr<MetricsReporterFactory> factory,
+                                Logger* logger, Env* const env);
+
+  Logger* GetLogger() const { return logger_; }
+  Env* GetEnv() { return env_; }
+
+  HistReporterHandle* BuildHistReporter(const std::string& name,
+                                        const std::string& tags) {
+    return factory_->BuildHistReporter(name, tags, logger_, env_);
+  }
+
+  CountReporterHandle* BuildCountReporter(const std::string& name,
+                                          const std::string& tags) {
+    return factory_->BuildCountReporter(name, tags, logger_, env_);
+  }
+};
+
 }  // namespace TERARKDB_NAMESPACE

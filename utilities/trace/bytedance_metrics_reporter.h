@@ -1,29 +1,31 @@
 #include <atomic>
-#include <chrono>
-#include <list>
+#include <deque>
 
 #include "rocksdb/env.h"
 #include "rocksdb/metrics_reporter.h"
 #include "rocksdb/terark_namespace.h"
 #include "stats.h"
-
 namespace TERARKDB_NAMESPACE {
 class ByteDanceHistReporterHandle : public HistReporterHandle {
  public:
-#ifdef TERARKDB_ENABLE_METRICS
+#ifdef WITH_BYTEDANCE_METRICS
   ByteDanceHistReporterHandle(const std::string& name, const std::string& tags,
-                              Logger* log)
+                              Logger* logger, Env* const env)
       : name_(name),
         tags_(tags),
-        last_log_time_(std::chrono::high_resolution_clock::now()),
-        log_(log) {}
+        logger_(logger),
+        env_(env),
+        last_log_time_ns_(env_->NowNanos()),
+        stats_(last_log_time_ns_) {}
 #else
   ByteDanceHistReporterHandle(const std::string& /*name*/,
-                              const std::string& /*tags*/, Logger* /*log*/) {}
+                              const std::string& /*tags*/, Logger* logger,
+                              Env* const env)
+      : logger_(logger), env_(env) {}
 #endif
 
   ~ByteDanceHistReporterHandle() override {
-#ifdef TERARKDB_ENABLE_METRICS
+#ifdef WITH_BYTEDANCE_METRICS
     for (auto* s : stats_arr_) {
       delete s;
     }
@@ -33,22 +35,42 @@ class ByteDanceHistReporterHandle : public HistReporterHandle {
  public:
   void AddRecord(size_t val) override;
 
+  const char* GetName() override {
+#ifdef WITH_BYTEDANCE_METRICS
+    return name_.c_str();
+#else
+    return "";
+#endif
+  }
+  const char* GetTag() override {
+#ifdef WITH_BYTEDANCE_METRICS
+    return tags_.c_str();
+#else
+    return "";
+#endif
+  }
+  Logger* GetLogger() override { return logger_; }
+  Env* GetEnv() override { return env_; }
+
  private:
-#ifdef TERARKDB_ENABLE_METRICS
+#ifdef WITH_BYTEDANCE_METRICS
   enum {
       kMaxThreadNum = 8192,
   };
-
   const std::string& name_;
   const std::string& tags_;
 
-  std::chrono::high_resolution_clock::time_point last_log_time_;
-  Logger* log_;
+  Logger* logger_;
+  Env* env_;
+  uint64_t last_log_time_ns_;
 
   std::array<HistStats<>*, kMaxThreadNum> stats_arr_{};
 
   std::atomic<bool> merge_lock_{false};
   HistStats<> stats_;
+#else
+  Logger* logger_;
+  Env* env_;
 #endif
 
   HistStats<>* GetThreadLocalStats();
@@ -56,17 +78,19 @@ class ByteDanceHistReporterHandle : public HistReporterHandle {
 
 class ByteDanceCountReporterHandle : public CountReporterHandle {
  public:
-#ifdef TERARKDB_ENABLE_METRICS
+#ifdef WITH_BYTEDANCE_METRICS
   ByteDanceCountReporterHandle(const std::string& name, const std::string& tags,
-                               Logger* log)
+                               Logger* logger, Env* const env)
       : name_(name),
         tags_(tags),
-        last_report_time_(std::chrono::high_resolution_clock::now()),
-        last_log_time_(std::chrono::high_resolution_clock::now()),
-        log_(log) {}
+        env_(env),
+        last_report_time_ns_(env_->NowNanos()),
+        last_log_time_ns_(env_->NowNanos()),
+        logger_(logger) {}
 #else
   ByteDanceCountReporterHandle(const std::string& /*name*/,
-                               const std::string& /*tags*/, Logger* /*log*/) {}
+                               const std::string& /*tags*/, Logger* /*logger*/,
+                               Env* const /*env*/) {}
 #endif
 
   ~ByteDanceCountReporterHandle() override = default;
@@ -75,19 +99,17 @@ class ByteDanceCountReporterHandle : public CountReporterHandle {
   void AddCount(size_t val) override;
 
  private:
-#ifdef TERARKDB_ENABLE_METRICS
+#ifdef WITH_BYTEDANCE_METRICS
   std::atomic<bool> reporter_lock_{false};
 
   const std::string& name_;
   const std::string& tags_;
-
-  std::chrono::high_resolution_clock::time_point last_report_time_;
+  Env* const env_;
+  uint64_t last_report_time_ns_;
   size_t last_report_count_ = 0;
 
-  std::chrono::high_resolution_clock::time_point last_log_time_;
-  Logger* log_;
-
-  char _padding_[64 /* x86 cache line size */ - 8 * 7];
+  uint64_t last_log_time_ns_;
+  Logger* logger_;
 
   std::atomic<size_t> count_{0};
 #endif
@@ -97,23 +119,25 @@ class ByteDanceMetricsReporterFactory : public MetricsReporterFactory {
  public:
   ByteDanceMetricsReporterFactory();
 
-  ByteDanceMetricsReporterFactory(const std::string& ns);
+  explicit ByteDanceMetricsReporterFactory(const std::string& ns);
 
   ~ByteDanceMetricsReporterFactory() override = default;
 
  public:
   ByteDanceHistReporterHandle* BuildHistReporter(const std::string& name,
                                                  const std::string& tags,
-                                                 Logger* log) override;
+                                                 Logger* logger,
+                                                 Env* const env) override;
 
   ByteDanceCountReporterHandle* BuildCountReporter(const std::string& name,
                                                    const std::string& tags,
-                                                   Logger* log) override;
+                                                   Logger* logger,
+                                                   Env* const env) override;
 
  private:
-#ifdef TERARKDB_ENABLE_METRICS
-  std::list<ByteDanceHistReporterHandle> hist_reporters_;
-  std::list<ByteDanceCountReporterHandle> count_reporters_;
+#ifdef WITH_BYTEDANCE_METRICS
+  std::deque<ByteDanceHistReporterHandle> hist_reporters_;
+  std::deque<ByteDanceCountReporterHandle> count_reporters_;
 #endif
 
   void InitNamespace(const std::string& ns);

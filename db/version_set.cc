@@ -1410,11 +1410,13 @@ void Version::Get(const ReadOptions& read_options, const Slice& user_key,
     }
     // merge_operands are in saver and we hit the beginning of the key history
     // do a final merge of nullptr and operands;
-    *status = MergeHelper::TimedFullMerge(
-        merge_operator_, user_key, nullptr, merge_context->GetOperands(), value,
-        info_log_, db_statistics_, env_, true);
-    if (status->ok()) {
-      value->pin(LazyBufferPinLevel::Internal);
+    if (value != nullptr) {
+      *status = MergeHelper::TimedFullMerge(
+          merge_operator_, user_key, nullptr, merge_context->GetOperands(),
+          value, info_log_, db_statistics_, env_, true);
+      if (status->ok()) {
+        value->pin(LazyBufferPinLevel::Internal);
+      }
     }
   } else {
     if (key_exists != nullptr) {
@@ -3469,6 +3471,9 @@ Status VersionSet::LogAndApply(
     // TODO (yanqin) maybe use a different status code to denote column family
     // drop other than OK and ShutdownInProgress
     for (int i = 0; i != num_cfds; ++i) {
+      for (auto& edit : manifest_writers_.front()->edit_list) {
+        edit->DoApplyCallback(Status::ShutdownInProgress());
+      }
       manifest_writers_.pop_front();
     }
     // Notify new head of manifest write queue.

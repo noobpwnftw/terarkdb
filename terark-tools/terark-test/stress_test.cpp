@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-#ifdef BOOSTLIB
+#ifdef WITH_BOOSTLIB
 #include <boost/fiber/future.hpp>
 #endif
 #include <db/memtable.h>
@@ -308,7 +308,6 @@ std::string get_value(size_t i) {
 void get_options(int argc, const char *argv[], TERARKDB_NAMESPACE::Options &options,
                  TERARKDB_NAMESPACE::BlockBasedTableOptions &bbto,
                  TERARKDB_NAMESPACE::TerarkZipTableOptions &tzto) {
-  options.atomic_flush = false;
   options.allow_mmap_reads = true;
   options.max_open_files = 8192;
   options.allow_fallocate = true;
@@ -1365,7 +1364,7 @@ DEBUG: 1st pass => '00000007' seq:4, type:1 / 000100000101
     std::vector<TERARKDB_NAMESPACE::Slice> keys;
     std::vector<std::string> values;
 #if ASYNC_TEST
-#ifdef BOOSTLIB
+#ifdef WITH_BOOSTLIB
     std::vector<
         boost::fibers::future<std::tuple<Status, std::string, std::string>>>
         futures;
@@ -1809,7 +1808,7 @@ DEBUG: 1st pass => '00000007' seq:4, type:1 / 000100000101
           for (auto &k : keys) {
             k = key;
           }
-#ifdef BOOSTLIB
+#ifdef WITH_BOOSTLIB
           for (size_t i = 0; i < hs.size(); ++i) {
             ss[i] = db->Get(ro, hs[i], keys[i], &values[i]);
             db->GetAsync(ro, hs[i], keys[i].ToString(), &async_values[i],

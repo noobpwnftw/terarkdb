@@ -103,7 +103,7 @@
 #include <terark/util/fiber_pool.hpp>
 #endif
 
-#ifdef BOOSTLIB
+#ifdef WITH_BOOSTLIB
 #include <boost/fiber/all.hpp>
 #endif
 
@@ -281,55 +281,55 @@ DBImpl::DBImpl(const DBOptions& options, const std::string& dbname,
 
       write_qps_reporter_(*metrics_reporter_factory_->BuildCountReporter(
           write_qps_metric_name, bytedance_tags_,
-          immutable_db_options_.info_log.get())),
+          immutable_db_options_.info_log.get(), env_)),
       read_qps_reporter_(*metrics_reporter_factory_->BuildCountReporter(
           read_qps_metric_name, bytedance_tags_,
-          immutable_db_options_.info_log.get())),
+          immutable_db_options_.info_log.get(), env_)),
       newiterator_qps_reporter_(*metrics_reporter_factory_->BuildCountReporter(
           newiterator_qps_metric_name, bytedance_tags_,
-          immutable_db_options_.info_log.get())),
+          immutable_db_options_.info_log.get(), env_)),
       seek_qps_reporter_(*metrics_reporter_factory_->BuildCountReporter(
           seek_qps_metric_name, bytedance_tags_,
-          immutable_db_options_.info_log.get())),
+          immutable_db_options_.info_log.get(), env_)),
       next_qps_reporter_(*metrics_reporter_factory_->BuildCountReporter(
           next_qps_metric_name, bytedance_tags_,
-          immutable_db_options_.info_log.get())),
+          immutable_db_options_.info_log.get(), env_)),
       seekforprev_qps_reporter_(*metrics_reporter_factory_->BuildCountReporter(
           seekforprev_qps_metric_name, bytedance_tags_,
-          immutable_db_options_.info_log.get())),
+          immutable_db_options_.info_log.get(), env_)),
       prev_qps_reporter_(*metrics_reporter_factory_->BuildCountReporter(
           prev_qps_metric_name, bytedance_tags_,
-          immutable_db_options_.info_log.get())),
+          immutable_db_options_.info_log.get(), env_)),
 
       write_latency_reporter_(*metrics_reporter_factory_->BuildHistReporter(
           write_latency_metric_name, bytedance_tags_,
-          immutable_db_options_.info_log.get())),
+          immutable_db_options_.info_log.get(), env_)),
       read_latency_reporter_(*metrics_reporter_factory_->BuildHistReporter(
           read_latency_metric_name, bytedance_tags_,
-          immutable_db_options_.info_log.get())),
+          immutable_db_options_.info_log.get(), env_)),
       newiterator_latency_reporter_(
           *metrics_reporter_factory_->BuildHistReporter(
               newiterator_latency_metric_name, bytedance_tags_,
-              immutable_db_options_.info_log.get())),
+              immutable_db_options_.info_log.get(), env_)),
       seek_latency_reporter_(*metrics_reporter_factory_->BuildHistReporter(
           seek_latency_metric_name, bytedance_tags_,
-          immutable_db_options_.info_log.get())),
+          immutable_db_options_.info_log.get(), env_)),
       next_latency_reporter_(*metrics_reporter_factory_->BuildHistReporter(
           next_latency_metric_name, bytedance_tags_,
-          immutable_db_options_.info_log.get())),
+          immutable_db_options_.info_log.get(), env_)),
       seekforprev_latency_reporter_(
           *metrics_reporter_factory_->BuildHistReporter(
               seekforprev_latency_metric_name, bytedance_tags_,
-              immutable_db_options_.info_log.get())),
+              immutable_db_options_.info_log.get(), env_)),
       prev_latency_reporter_(*metrics_reporter_factory_->BuildHistReporter(
           prev_latency_metric_name, bytedance_tags_,
-          immutable_db_options_.info_log.get())),
+          immutable_db_options_.info_log.get(), env_)),
       write_throughput_reporter_(*metrics_reporter_factory_->BuildCountReporter(
           write_throughput_metric_name, bytedance_tags_,
-          immutable_db_options_.info_log.get())),
+          immutable_db_options_.info_log.get(), env_)),
       write_batch_size_reporter_(*metrics_reporter_factory_->BuildHistReporter(
           write_batch_size_metric_name, bytedance_tags_,
-          immutable_db_options_.info_log.get())) {
+          immutable_db_options_.info_log.get(), env_)) {
   // !batch_per_trx_ implies seq_per_batch_ because it is only unset for
   // WriteUnprepared, which should use seq_per_batch_.
   assert(batch_per_txn_ || seq_per_batch_);
@@ -419,26 +419,19 @@ Status DBImpl::ResumeImpl() {
     FlushOptions flush_opts;
     // We allow flush to stall write since we are trying to resume from error.
     flush_opts.allow_write_stall = true;
-    if (immutable_db_options_.atomic_flush) {
-      autovector<ColumnFamilyData*> cfds;
-      SelectColumnFamiliesForAtomicFlush(&cfds);
-      mutex_.Unlock();
-      s = AtomicFlushMemTables(cfds, flush_opts, FlushReason::kErrorRecovery);
-      mutex_.Lock();
-    } else {
-      for (auto cfd : *versions_->GetColumnFamilySet()) {
-        if (cfd->IsDropped()) {
-          continue;
-        }
-        cfd->Ref();
-        mutex_.Unlock();
-        s = FlushMemTable(cfd, flush_opts, FlushReason::kErrorRecovery);
-        mutex_.Lock();
-        cfd->Unref();
-        if (!s.ok()) {
-          break;
-        }
+    autovector<ColumnFamilyData*> cfds;
+    for (auto cfd : *versions_->GetColumnFamilySet()) {
+      if (cfd->IsDropped()) {
+        continue;
       }
+      cfd->Ref();
+      cfds.push_back(cfd);
+    }
+    mutex_.Unlock();
+    s = FlushMemTable(cfds, flush_opts, FlushReason::kErrorRecovery);
+    mutex_.Lock();
+    for (auto cfd : cfds) {
+      cfd->Unref();
     }
     if (!s.ok()) {
       ROCKS_LOG_INFO(immutable_db_options_.info_log,
@@ -508,22 +501,18 @@ void DBImpl::CancelAllBackgroundWork(bool wait) {
   if (!shutting_down_.load(std::memory_order_acquire) &&
       has_unpersisted_data_.load(std::memory_order_relaxed) &&
       !mutable_db_options_.avoid_flush_during_shutdown) {
-    if (immutable_db_options_.atomic_flush) {
-      autovector<ColumnFamilyData*> cfds;
-      SelectColumnFamiliesForAtomicFlush(&cfds);
-      mutex_.Unlock();
-      AtomicFlushMemTables(cfds, FlushOptions(), FlushReason::kShutDown);
-      mutex_.Lock();
-    } else {
-      for (auto cfd : *versions_->GetColumnFamilySet()) {
-        if (!cfd->IsDropped() && cfd->initialized() && !cfd->mem()->IsEmpty()) {
-          cfd->Ref();
-          mutex_.Unlock();
-          FlushMemTable(cfd, FlushOptions(), FlushReason::kShutDown);
-          mutex_.Lock();
-          cfd->Unref();
-        }
+    autovector<ColumnFamilyData*> cfds;
+    for (auto cfd : *versions_->GetColumnFamilySet()) {
+      if (!cfd->IsDropped() && cfd->initialized() && !cfd->mem()->IsEmpty()) {
+        cfd->Ref();
+        cfds.push_back(cfd);
       }
+    }
+    mutex_.Unlock();
+    FlushMemTable(cfds, FlushOptions(), FlushReason::kShutDown);
+    mutex_.Lock();
+    for (auto cfd : cfds) {
+      cfd->Unref();
     }
     versions_->GetColumnFamilySet()->FreeDeadColumnFamilies();
   }
@@ -1637,7 +1626,7 @@ Status DBImpl::Get(const ReadOptions& read_options,
                    ColumnFamilyHandle* column_family, const Slice& key,
                    LazyBuffer* value) {
   auto s = GetImpl(read_options, column_family, key, value);
-  assert(!s.ok() || value->valid());
+  assert(!s.ok() || value == nullptr || value->valid());
   return s;
 }
 
@@ -1648,7 +1637,6 @@ Status DBImpl::GetImpl(const ReadOptions& read_options,
   LatencyHistGuard guard(&read_latency_reporter_);
   read_qps_reporter_.AddCount(1);
 
-  assert(lazy_val != nullptr);
   StopWatch sw(env_, stats_, DB_GET);
   PERF_TIMER_GUARD(get_snapshot_time);
 
@@ -1742,7 +1730,7 @@ Status DBImpl::GetImpl(const ReadOptions& read_options,
     RecordTick(stats_, MEMTABLE_MISS);
   }
 
-  if (s.ok()) {
+  if (s.ok() && lazy_val != nullptr) {
     lazy_val->pin(LazyBufferPinLevel::DB);
     s = lazy_val->fetch();
   }
@@ -1761,7 +1749,7 @@ Status DBImpl::GetImpl(const ReadOptions& read_options,
   return s;
 }
 
-#ifdef BOOSTLIB
+#ifdef WITH_BOOSTLIB
 struct SimpleFiberTls {
   static constexpr intptr_t MAX_QUEUE_LEN = 256;
   static constexpr intptr_t DEFAULT_FIBER_CNT = 8;
@@ -1852,7 +1840,7 @@ struct SimpleFiberTls {
 // because SimpleFiberTls.channel must be destructed first
 static thread_local SimpleFiberTls gt_fibers(
     boost::fibers::context::active_pp());
-#endif  // BOOSTLIB
+#endif  // WITH_BOOSTLIB
 
 std::vector<Status> DBImpl::MultiGet(
     const ReadOptions& read_options,
@@ -1956,7 +1944,7 @@ std::vector<Status> DBImpl::MultiGet(
     }
     counting--;
   };
-#ifdef BOOSTLIB
+#ifdef WITH_BOOSTLIB
   if (read_options.aio_concurrency && immutable_db_options_.use_aio_reads) {
 #if 0
     static thread_local terark::RunOnceFiberPool fiber_pool(16);
@@ -1983,7 +1971,7 @@ std::vector<Status> DBImpl::MultiGet(
     for (size_t i = 0; i < num_keys; ++i) {
       get_one(i);
     }
-#ifdef BOOSTLIB
+#ifdef WITH_BOOSTLIB
   }
 #endif
 
@@ -3551,7 +3539,7 @@ Status DB::DestroyColumnFamilyHandle(ColumnFamilyHandle* column_family) {
 
 DB::~DB() {}
 
-#ifdef BOOSTLIB
+#ifdef WITH_BOOSTLIB
 void DB::CallOnMainStack(const std::function<void()>& fn) {
   gt_fibers.m_fy.sched()->call_on_main_stack(fn);
 }
@@ -3622,7 +3610,7 @@ void DB::GetAsync(const ReadOptions& ro, std::string key, GetAsyncCallback cb) {
 int DB::WaitAsync(int timeout_us) { return gt_fibers.wait(timeout_us); }
 
 int DB::WaitAsync() { return gt_fibers.wait(); }
-#endif  // BOOSTLIB
+#endif  // WITH_BOOSTLIB
 
 // using future needs boost symbols to be exported, but we don't want to
 // export boost symbols
@@ -4217,19 +4205,10 @@ Status DBImpl::IngestExternalFile(
       if (status.ok() && need_flush) {
         FlushOptions flush_opts;
         flush_opts.allow_write_stall = true;
-        if (immutable_db_options_.atomic_flush) {
-          autovector<ColumnFamilyData*> cfds;
-          SelectColumnFamiliesForAtomicFlush(&cfds);
-          mutex_.Unlock();
-          status = AtomicFlushMemTables(cfds, flush_opts,
-                                        FlushReason::kExternalFileIngestion,
-                                        true /* writes_stopped */);
-        } else {
-          mutex_.Unlock();
-          status = FlushMemTable(cfd, flush_opts,
-                                 FlushReason::kExternalFileIngestion,
-                                 true /* writes_stopped */);
-        }
+        mutex_.Unlock();
+        status = FlushMemTable({cfd}, flush_opts,
+                               FlushReason::kExternalFileIngestion,
+                               true /* writes_stopped */);
         mutex_.Lock();
       }
     }
