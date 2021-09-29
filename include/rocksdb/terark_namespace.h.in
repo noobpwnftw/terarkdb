@@ -11,3 +11,9 @@
 #cmakedefine WITH_TERARK_ZIP
 #cmakedefine WITH_BOOSTLIB
 #cmakedefine WITH_DIAGNOSE_CACHE
+#cmakedefine WITH_ZENFS
+
+#ifdef WITH_ZENFS
+#define ROCKSDB_NAMESPACE @WITH_TERARKDB_NAMESPACE@
+#define LIBZBD
+#endif

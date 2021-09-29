@@ -33,9 +33,14 @@ Writer::Writer(std::unique_ptr<WritableFileWriter>&& dest, uint64_t log_number,
   }
 }
 
-Writer::~Writer() { WriteBuffer(); }
+Writer::~Writer() {
+  WriteBuffer();
+  Frozen();
+}
 
 Status Writer::WriteBuffer() { return dest_->Flush(); }
+
+Status Writer::Frozen() { return dest_->Frozen(); }
 
 Status Writer::AddRecord(const Slice& slice) {
   const char* ptr = slice.data();

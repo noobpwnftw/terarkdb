@@ -76,7 +76,7 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
                          bool disable_memtable, uint64_t* seq_used,
                          size_t batch_cnt,
                          PreReleaseCallback* pre_release_callback) {
-  LatencyHistGuard guard(&write_latency_reporter_);
+  LatencyHistLoggedGuard guard(&write_latency_reporter_, 500000);
   write_qps_reporter_.AddCount(WriteBatchInternal::Count(my_batch));
   write_throughput_reporter_.AddCount(WriteBatchInternal::ByteSize(my_batch));
   write_batch_size_reporter_.AddRecord(WriteBatchInternal::ByteSize(my_batch));
@@ -905,7 +905,10 @@ Status DBImpl::WriteToWAL(const WriteThread::WriteGroup& write_group,
     //  - as long as other threads don't modify it, it's safe to read
     //    from std::deque from multiple threads concurrently.
     for (auto& log : logs_) {
-      status = log.writer->file()->Sync(immutable_db_options_.use_fsync);
+      auto f = log.writer->file();
+      if (f != nullptr) {
+        status = f->Sync(immutable_db_options_.use_fsync);
+      }
       if (!status.ok()) {
         break;
       }
@@ -1654,7 +1657,26 @@ Status DBImpl::SwitchMemtable(ColumnFamilyData* cfd, WriteContext* context) {
       // Alway flush the buffer of the last log before switching to a new one
       log::Writer* cur_log_writer = logs_.back().writer;
       s = cur_log_writer->WriteBuffer();
-      if (!s.ok()) {
+      if (s.ok()) {
+        // We frozen a file to let low-level filesystem knows we don't need to
+        // write to this file anymore.
+        // For ext4 with page cache, this function call will do nothing and take
+        // no effect to the page cache thus RocksDB still be able to sync &
+        // close this file again.
+        s = cur_log_writer->Frozen();
+      }
+      if (s.ok()) {
+        size_t alive_log_file_count = std::count_if(
+            logs_.begin(), logs_.end(), [](const LogWriterNumber& l) {
+              return l.writer->file() != nullptr;
+            });
+        // Output alive logger number for debug.
+        ROCKS_LOG_BUFFER(&context->warn_buffer,
+                         "Current Log count : %" PRIu64
+                         ", when close log writer: %" PRIu64 ".",
+                         alive_log_file_count,
+                         cur_log_writer->get_log_number());
+      } else {
         ROCKS_LOG_BUFFER(&context->warn_buffer,
                          "[%s] Failed to switch from #%" PRIu64 " to #%" PRIu64
                          "  WAL file -- %s\n",
@@ -1663,8 +1685,7 @@ Status DBImpl::SwitchMemtable(ColumnFamilyData* cfd, WriteContext* context) {
       }
     }
     logs_.emplace_back(logfile_number_, new_log);
-    alive_log_files_.push_back(
-        LogFileNumberSize(logfile_number_, versions_->LastSequence()));
+    alive_log_files_.emplace_back(logfile_number_, versions_->LastSequence());
     log_write_mutex_.Unlock();
   }
 

@@ -29,6 +29,7 @@ build/
 
 ldb
 manifest_dump
+zenfs
 sst_dump
 blob_dump
 column_aware_encoding_exp
@@ -82,6 +83,8 @@ terark-core.got
 cmake-build-debug
 pkg
 .DS_Store
+.clangd/
+compile_commands.json
 
 lz4-1.8.0/
 snappy-1.1.4/

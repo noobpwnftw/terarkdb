@@ -132,14 +132,13 @@ class WinMmapReadableFile : private WinFileData, public RandomAccessFile {
 
   ~WinMmapReadableFile();
 
+  bool is_mmap_open() const final { return true; }
+
   WinMmapReadableFile(const WinMmapReadableFile&) = delete;
   WinMmapReadableFile& operator=(const WinMmapReadableFile&) = delete;
 
-  bool is_mmap_open() const override { return true; }
-
   Status Read(uint64_t offset, size_t n, Slice* result,
               char* scratch) const override;
-  Status FsRead(uint64_t offset, size_t len, Slice*, void* buf) const override;
 
   Status InvalidateCache(size_t offset, size_t length) override;
 

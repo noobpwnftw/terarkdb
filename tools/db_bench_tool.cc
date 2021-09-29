@@ -77,6 +77,7 @@
 #include "utilities/merge_operators.h"
 #include "utilities/merge_operators/bytesxor.h"
 #include "utilities/persistent_cache/block_cache_tier.h"
+#include "utilities/trace/bytedance_metrics_reporter.h"
 
 #ifdef OS_WIN
 #include <io.h>  // open/close
@@ -826,10 +827,21 @@ DEFINE_uint64(prepare_log_writer_num, 1, "");
 DEFINE_string(env_uri, "",
               "URI for registry Env lookup. Mutually exclusive"
               " with --hdfs.");
+DEFINE_string(fs_uri, "",
+              "URI for registry Filesystem lookup. Mutually exclusive"
+              " with --hdfs and --env_uri."
+              " Creates a default environment with the specified filesystem.");
 #endif  // ROCKSDB_LITE
 DEFINE_string(hdfs, "",
               "Name of hdfs environment. Mutually exclusive with"
-              " --env_uri.");
+              " --env_uri and --fs_uri");
+#ifdef WITH_ZENFS
+DEFINE_string(zbd_path, "", "Path of zone block device.");
+DEFINE_string(aux_path, "", "Aux path for zenfs.");
+#endif
+
+static std::shared_ptr<TERARKDB_NAMESPACE::Env> env_guard;
+
 static TERARKDB_NAMESPACE::Env* FLAGS_env = TERARKDB_NAMESPACE::Env::Default();
 
 DEFINE_int64(stats_interval, 0,
@@ -1159,6 +1171,13 @@ DEFINE_bool(report_file_operations, false,
             "if report number of file "
             "operations");
 
+DEFINE_double(zenfs_gc_ratio, 0.25,
+              "When ZenFS support is enabled, a full zone with more than "
+              "garbage of this ratio will be recycled. This options is "
+              "not recommended to be used with lazy compaction. At the "
+              "same time, zone size * gc ratio should be less than "
+              "zone size minus single SST size.");
+
 static const bool FLAGS_soft_rate_limit_dummy __attribute__((__unused__)) =
     RegisterFlagValidator(&FLAGS_soft_rate_limit, &ValidateRateLimit);
 
@@ -1188,6 +1207,8 @@ static const bool FLAGS_table_cache_numshardbits_dummy
         &FLAGS_table_cache_numshardbits, &ValidateTableCacheNumshardbits);
 
 namespace TERARKDB_NAMESPACE {
+
+static std::shared_ptr<ByteDanceMetricsReporterFactory> metrics_reporter_factory = nullptr;
 
 namespace {
 struct ReportFileOpCounters {
@@ -1295,7 +1316,11 @@ class ReportFileOpEnv : public EnvWrapper {
                                             std::memory_order_relaxed);
         return rv;
       }
-
+      virtual Status Append(
+          const Slice& data,
+          const DataVerificationInfo& /* verification_info */) {
+        return Append(data);
+      }
       Status Truncate(uint64_t size) override {
         return target_->Truncate(size);
       }
@@ -1375,7 +1400,7 @@ struct DBWithColumnFamilies {
   DB* db;
 #ifndef ROCKSDB_LITE
   OptimisticTransactionDB* opt_txn_db;
-#endif  // ROCKSDB_LITE
+#endif                              // ROCKSDB_LITE
   std::atomic<size_t> num_created;  // Need to be updated after all the
                                     // new entries in cfh are set.
   size_t num_hot;  // Number of column families to be queried at each moment.
@@ -3211,6 +3236,9 @@ class Benchmark {
 
     assert(db_.db == nullptr);
 
+    if (metrics_reporter_factory == nullptr)
+      metrics_reporter_factory = std::make_shared<ByteDanceMetricsReporterFactory>();
+    options.metrics_reporter_factory = metrics_reporter_factory;
     options.max_open_files = FLAGS_open_files;
     if (FLAGS_cost_write_buffer_to_cache || FLAGS_db_write_buffer_size != 0) {
       options.write_buffer_manager.reset(
@@ -3234,6 +3262,7 @@ class Benchmark {
     options.use_direct_io_for_flush_and_compaction =
         FLAGS_use_direct_io_for_flush_and_compaction;
     options.use_aio_reads = FLAGS_use_aio_reads;
+    options.zenfs_gc_ratio = FLAGS_zenfs_gc_ratio;
     if (FLAGS_prefix_size != 0) {
       options.prefix_extractor.reset(
           NewFixedPrefixTransform(FLAGS_prefix_size));
@@ -4029,7 +4058,8 @@ class Benchmark {
         }
       }
       if (!s.ok()) {
-        fprintf(stderr, "try recovering from put error: %s\n", s.ToString().c_str());
+        fprintf(stderr, "try recovering from put error: %s\n",
+                s.ToString().c_str());
         s = listener_->WaitForRecovery(600000000) ? Status::OK() : s;
       }
 
@@ -5786,9 +5816,8 @@ int db_bench_tool(int argc, char** argv) {
   }
   if (!FLAGS_statistics_string.empty()) {
     std::unique_ptr<Statistics> custom_stats_guard;
-    dbstats.reset(NewCustomObject<Statistics>(FLAGS_statistics_string,
-                                              &custom_stats_guard));
-    custom_stats_guard.release();
+    Status s = ObjectRegistry::NewInstance()->NewSharedObject<Statistics>(
+        FLAGS_statistics_string, &dbstats);
     if (dbstats == nullptr) {
       fprintf(stderr, "No Statistics registered matching string: %s\n",
               FLAGS_statistics_string.c_str());
@@ -5817,17 +5846,39 @@ int db_bench_tool(int argc, char** argv) {
       StringToCompressionType(FLAGS_compression_type.c_str());
 
 #ifndef ROCKSDB_LITE
+  int env_opts =
+      !FLAGS_hdfs.empty() + !FLAGS_env_uri.empty() + !FLAGS_fs_uri.empty();
+  if (env_opts > 1) {
+    fprintf(stderr,
+            "Error: --hdfs, --env_uri and --fs_uri are mutually exclusive\n");
+    exit(1);
+  }
   std::unique_ptr<Env> custom_env_guard;
   if (!FLAGS_hdfs.empty() && !FLAGS_env_uri.empty()) {
     fprintf(stderr, "Cannot provide both --hdfs and --env_uri.\n");
     exit(1);
   } else if (!FLAGS_env_uri.empty()) {
-    FLAGS_env = NewCustomObject<Env>(FLAGS_env_uri, &custom_env_guard);
+    Status s = Env::LoadEnv(FLAGS_env_uri, &FLAGS_env, &env_guard);
     if (FLAGS_env == nullptr) {
       fprintf(stderr, "No Env registered for URI: %s\n", FLAGS_env_uri.c_str());
       exit(1);
     }
+  } 
+#ifdef WITH_ZENFS
+  else if (!FLAGS_zbd_path.empty()) {
+    if (metrics_reporter_factory == nullptr) {
+      metrics_reporter_factory = std::make_shared<ByteDanceMetricsReporterFactory>();
+    }
+
+    auto dbname = "dbname=" + FLAGS_zbd_path;
+    Status s = NewZenfsEnv(&FLAGS_env, FLAGS_zbd_path, dbname, metrics_reporter_factory);
+    if (!s.ok()) {
+        fprintf(stderr, "Error: Init zenfs env failed.\nStatus : %s\n", s.ToString().c_str());
+        exit(1);
+    }
   }
+
+#endif // WITH_ZENFS
 #endif  // ROCKSDB_LITE
   if (!FLAGS_hdfs.empty()) {
     FLAGS_env = new TERARKDB_NAMESPACE::HdfsEnv(FLAGS_hdfs);

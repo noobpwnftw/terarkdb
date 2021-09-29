@@ -25,6 +25,7 @@ else()
   SET(CMAKE_INSTALL_INCLUDEDIR ${CMAKE_INSTALL_PREFIX}/include)
 endif()
 
+# Enable or disable flags
 option(WITH_COVERAGE "build with gcov support" OFF)
 option(WITH_JEMALLOC "build with JeMalloc" ON)
 option(WITH_SNAPPY "build with SNAPPY" ON)
@@ -41,9 +42,17 @@ include(CMakeDependentOption)
 CMAKE_DEPENDENT_OPTION(WITH_TESTS "build with tests" ON "CMAKE_BUILD_TYPE STREQUAL Debug" OFF)
 option(WITH_TOOLS "build with tools" OFF)
 option(WITH_TERARK_ZIP "build with TerarkZipTable support" ON)
+option(WITH_ZENFS "build with experimental zenfs" OFF)
 option(WITH_DIAGNOSE_CACHE "build with diagnosable cache support" OFF)
 option(WITH_BOOSTLIB "build with boost, if WITH_TERARK_ZIP is ON, this will also set to ON" OFF)
 option(WITH_TERARKDB_NAMESPACE "namespace" "terarkdb")
+
+# Plugins
+SET(BYTEDANCE_METRICS_PATH "" CACHE STRING "root directory of the metrics library source code")
+
+if(WITH_BYTEDANCE_METRICS AND BYTEDANCE_METRICS_PATH STREQUAL "" AND NOT TARGET metrics2)
+  MESSAGE(FATAL_ERROR "WITH_BYTEDANCE_METRICS enabled but BYTEDANCE_METRICS_PATH is not configured")
+endif()
 
 if(NOT WITH_TERARKDB_NAMESPACE)
   SET(WITH_TERARKDB_NAMESPACE "terarkdb")
@@ -95,6 +104,7 @@ MESSAGE("[terarkdb] WITH_JEMALLOC = ${WITH_JEMALLOC}, WITH_COVERAGE=${WITH_COVER
 MESSAGE("[terarkdb] CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}, BUILD_SUFFIX=${BUILD_SUFFIX}")
 MESSAGE("[terarkdb] CMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}")
 MESSAGE("[terarkdb] CMAKE_THREAD_LIBS_INIT=${CMAKE_THREAD_LIBS_INIT}")
+MESSAGE("[terarkdb] BYTEDANCE_METRICS_PATH=${BYTEDANCE_METRICS_PATH}")
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/include/rocksdb/terark_namespace.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/rocksdb/terark_namespace.h)
 
@@ -377,6 +387,10 @@ if(WITH_TBB)
   list(APPEND THIRDPARTY_LIBS ${TBB_LIBRARIES})
 endif()
 
+if(WITH_ZENFS)
+  list(APPEND THIRDPARTY_LIBS zbd)
+endif()
+
 # Stall notifications eat some performance from inserts
 option(DISABLE_STALL_NOTIF "Build with stall notifications" OFF)
 if(DISABLE_STALL_NOTIF)
@@ -606,6 +620,7 @@ set(SOURCES
         env/env_encryption.cc
         env/env_hdfs.cc
         env/env_io_prof.cc
+        env/file_system.cc
         env/mock_env.cc
         memtable/alloc_tracker.cc
         memtable/concurrent_hashduallist_rep.cc
@@ -736,6 +751,7 @@ set(SOURCES
         utilities/merge_operators/string_append/stringappend.cc
         utilities/merge_operators/string_append/stringappend2.cc
         utilities/merge_operators/uint64add.cc
+        utilities/object_registry.cc
         utilities/option_change_migration/option_change_migration.cc
         utilities/options/options_util.cc
         utilities/persistent_cache/block_cache_tier.cc
@@ -830,6 +846,14 @@ if(WIN32)
       port/port_posix.cc
       env/env_posix.cc
       env/io_posix.cc)
+
+    if(WITH_ZENFS)
+      list(APPEND SOURCES
+        env/env_zenfs.cc
+        third-party/zenfs/fs/fs_zenfs.cc
+        third-party/zenfs/fs/io_zenfs.cc
+        third-party/zenfs/fs/zbd_zenfs.cc)
+    endif()
 endif()
 
 set(ROCKSDB_STATIC_LIB terarkdb${ARTIFACT_SUFFIX})
@@ -922,7 +946,7 @@ if(NOT WIN32 OR ROCKSDB_INSTALL_ON_WINDOWS)
   # We should also expose terarkdb's source dir
   INSTALL(DIRECTORY memtable monitoring env db cache options port table util utilities
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-        FILES_MATCHING 
+        FILES_MATCHING
         PATTERN "*.h"
         PATTERN "*.hpp"
   )
@@ -1186,6 +1210,22 @@ if(WITH_TOOLS)
       tools/db_bench_tool.cc
       $<TARGET_OBJECTS:testharness>)
   target_link_libraries(db_bench${ARTIFACT_SUFFIX} gtest ${ROCKSDB_STATIC_LIB})
+
+  if(WITH_ZENFS)
+    include_directories(third-party/zenfs)
+    add_executable(zenfs${ARTIFACT_SUFFIX} third-party/zenfs/util/zenfs.cc
+            $<TARGET_OBJECTS:testharness>)
+    target_link_libraries(zenfs${ARTIFACT_SUFFIX} gtest ${ROCKSDB_STATIC_LIB})
+
+    FILE(GLOB ZENFS_TESTS third-party/zenfs/test/*_test.cc)
+    foreach(sourcefile ${ZENFS_TESTS})
+      get_filename_component(exename ${sourcefile} NAME_WE)
+      add_executable(${exename}${ARTIFACT_SUFFIX} ${sourcefile}
+              $<TARGET_OBJECTS:testharness>)
+      target_link_libraries(${exename}${ARTIFACT_SUFFIX} gtest ${ROCKSDB_STATIC_LIB})
+    endforeach(sourcefile ${BENCHMARKS})
+
+  endif()
 
   if(WITH_TERARK_ZIP)
     add_subdirectory(terark-tools/terark-test)
