@@ -2,6 +2,15 @@ cmake_minimum_required(VERSION 3.6)
 
 SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
 
+if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
+  SET(CPDIR_FLAGS "-r")
+elseif(CMAKE_SYSTEM_NAME MATCHES "Windows")
+  MESSAGE(FATAL_ERROR "Comming soon ...")
+else()
+  SET(CPDIR_FLAGS "-rT")
+endif()
+
+
 PROJECT(terarkdb-third-party)
 #SET(CMAKE_VERBOSE_MAKEFILE ON)
 
@@ -179,7 +188,7 @@ IF(WITH_BZ2)
     )
   ENDIF()
 ENDIF()
- 
+
 # Jemalloc
 IF(WITH_JEMALLOC)
   if(TARGET jemalloc)
