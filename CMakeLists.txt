@@ -192,7 +192,7 @@ if(WITH_ZSTD)
   add_definitions(-DZSTD)
   get_target_property(zstd_INCLUDE_DIR zstd INCLUDE_DIRECTORIES)
   include_directories(${zstd_INCLUDE_DIR})
-  list(APPEND THIRDPARTY_LIBS zstd)
+  #list(APPEND THIRDPARTY_LIBS zstd)
   message("[terarkdb] zstd include dir : ${zstd_INCLUDE_DIR}")
 endif()
 
