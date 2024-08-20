@@ -388,7 +388,7 @@ if(WITH_TBB)
     add_definitions(-DTERARK_WITH_TBB=1)
   endif()
   include_directories(${TBB_INCLUDE_DIR})
-  list(APPEND THIRDPARTY_LIBS ${TBB_LIBRARIES})
+  list(APPEND TERARK_SHARED_DEPENDS ${TBB_LIBRARIES})
 endif()
 
 if(WITH_ZENFS)
