@@ -16,8 +16,6 @@ static void usage(const char* prog) {
 
   -f use_fiber for multi_get
 
-  -a use_aio(default true)
-
   -b bench_report(default 0)
 
   -d use_direct_io(default true)
@@ -49,7 +47,6 @@ int main(int argc, char* argv[]) {
 
   TERARKDB_NAMESPACE::Options dopt;
   TERARKDB_NAMESPACE::ReadOptions ropt;
-  dopt.use_aio_reads = true;
   dopt.use_direct_reads = true;
   ropt.aio_concurrency = 16;
   bool quite = false;
@@ -61,9 +58,6 @@ int main(int argc, char* argv[]) {
         return 1;
       case -1:
         goto GetoptDone;
-      case 'a':
-        dopt.use_aio_reads = atoi(optarg) != 0;
-        break;
       case 'b':
         bench_report = atoi(optarg);
         break;
@@ -122,10 +116,9 @@ GetoptDone:
       if (cnt1 >= bench_report) {
         auto t1 = pf.now();
         fprintf(stderr,
-                "mget(fibers=%d,direct_io=%d,aio=%d) qps = %f M/sec\n",
+                "mget(fibers=%d,direct_io=%d) qps = %f M/sec\n",
                 ropt.aio_concurrency,
-                dopt.use_aio_reads,
-                dopt.use_aio_reads,
+                dopt.use_direct_reads,
                 cnt1/pf.uf(t0,t1));
         t0 = t1;
         cnt1 = 0;

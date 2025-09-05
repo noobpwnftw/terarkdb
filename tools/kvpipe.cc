@@ -9,8 +9,6 @@
 static void usage(const char* prog) {
   fprintf(stderr, R"EOS(usage: %s
 
-  -a use_aio(default true)
-
   -b bench_report(default 0)
 
   -d use_direct_io(default true)
@@ -57,7 +55,6 @@ int main(int argc, char* argv[]) {
   size_t bench_report = 0;
   size_t cnt1 = 0, cnt2 = 0;
   TERARKDB_NAMESPACE::Options opt;
-  opt.use_aio_reads = true;
   opt.use_direct_reads = true;
   bool quite = false;
   for (int gopt=0; -1 != gopt && '?' != gopt;) {
@@ -68,9 +65,6 @@ int main(int argc, char* argv[]) {
         return 1;
       case -1:
         goto GetoptDone;
-      case 'a':
-        opt.use_aio_reads = atoi(optarg) != 0;
-        break;
       case 'b':
         bench_report = atoi(optarg);
         break;
