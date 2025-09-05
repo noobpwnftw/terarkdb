@@ -1143,7 +1143,6 @@ Status TerarkZipTableReader::Open(RandomAccessFileReader* file,
         tzto_.forceMetaInMemory
             ? AbstractBlobStore::Dictionary(fstringOf(dict), 0, false)
             : getVerifyDict(dict)));
-    subReader_.store_->set_mmap_aio(file->file()->use_aio_reads());
   } catch (const BadCrc32cException& ex) {
     return Status::Corruption("TerarkZipTableReader::Open()", ex.what());
   } catch (const BadCrc16cException& ex) {
@@ -1168,6 +1167,7 @@ Status TerarkZipTableReader::Open(RandomAccessFileReader* file,
   if (subReader_.storeUsePread_) {
     subReader_.cache_ = table_factory_->cache();
     if (subReader_.cache_) {
+      subReader_.cache_->add_ref();
 #ifndef _MSC_VER
       int fileFD = (int)subReader_.storeFD_;
 #ifdef OS_MACOSX
@@ -1240,12 +1240,11 @@ Status TerarkZipTableReader::Open(RandomAccessFileReader* file,
     for (fstring block : subReader_.store_->get_data_blocks()) {
       MmapWarmUp(block);
     }
-  } else {
-    // MmapColdize(subReader_.store_->get_mmap());
-    if (ioptions.advise_random_on_open) {
-      for (fstring block : subReader_.store_->get_data_blocks()) {
-        MmapAdviseRandom(block);
-      }
+  }
+  if (ioptions.advise_random_on_open) {
+    MmapAdviseRandom(subReader_.index_->Memory());
+    for (fstring block : subReader_.store_->get_data_blocks()) {
+      MmapAdviseRandom(block);
     }
   }
   subReader_.file_number_ = table_reader_options_.file_number;
@@ -1260,9 +1259,6 @@ Status TerarkZipTableReader::Open(RandomAccessFileReader* file,
        subReader_.index_->NumKeys(), size_t(props->index_size),
        size_t(props->data_size), g_pf.sf(t0, t1), g_pf.sf(t1, t2));
 
-  if (!tzto_.warmUpIndexOnOpen) {
-    MmapColdize(fstring(file_data.data(), file_data.size()));
-  }
   for (fstring meta_item : meta_data_in_mmap) {
     MmapAdviseSequential(meta_item);
   }
@@ -1375,6 +1371,7 @@ TerarkZipTableReader::~TerarkZipTableReader() {
   if (subReader_.storeUsePread_) {
     if (subReader_.cache_) {
       subReader_.cache_->close(subReader_.storeFD_);
+      subReader_.cache_->release();
     }
   }
 }
@@ -1419,6 +1416,7 @@ TerarkZipTableMultiReader::SubIndex::~SubIndex() {
   if (cache_fi_ >= 0) {
     assert(nullptr != cache_);
     cache_->close(cache_fi_);
+    cache_->release();
   }
 }
 
@@ -1462,7 +1460,6 @@ Status TerarkZipTableMultiReader::SubIndex::Init(
       part.storeOffset_ = offset += curr.key;
       part.store_.reset(AbstractBlobStore::load_from_user_memory(
           fstring(baseAddress + offset, curr.value), dict));
-      part.store_->set_mmap_aio(fileObj->use_aio_reads());
       if (part.store_->is_offsets_zipped()) {
         hasAnyZipOffset_ = true;
       }
@@ -1500,6 +1497,7 @@ Status TerarkZipTableMultiReader::SubIndex::Init(
 #ifndef _MSC_VER
     if (cache_fi_ >= 0) {
       assert(nullptr != cache_);
+      cache_->add_ref();
 #ifdef OS_MACOSX
       if (fcntl((int)fileFD, F_NOCACHE, 1) == -1) {
         return Status::IOError(
@@ -1784,14 +1782,13 @@ Status TerarkZipTableMultiReader::Open(RandomAccessFileReader* file,
         MmapWarmUp(block);
       }
     }
-  } else {
-    // MmapColdize(fstring(file_data.data(), props->data_size));
-    if (ioptions.advise_random_on_open) {
-      for (size_t i = 0; i < subIndex_.GetSubCount(); ++i) {
-        auto part = subIndex_.GetSubReader(i);
-        for (fstring block : part->store_->get_data_blocks()) {
-          MmapAdviseRandom(block);
-        }
+  }
+  if (ioptions.advise_random_on_open) {
+    for (size_t i = 0; i < subIndex_.GetSubCount(); ++i) {
+      auto part = subIndex_.GetSubReader(i);
+      MmapAdviseRandom(part->index_->Memory());
+      for (fstring block : part->store_->get_data_blocks()) {
+        MmapAdviseRandom(block);
       }
     }
   }
@@ -1812,9 +1809,6 @@ Status TerarkZipTableMultiReader::Open(RandomAccessFileReader* file,
        size_t(props->index_size), size_t(props->data_size), g_pf.sf(t0, t1),
        g_pf.sf(t1, t2));
 
-  if (!tzto_.warmUpIndexOnOpen) {
-    MmapColdize(fstring(file_data.data(), file_data.size()));
-  }
   for (fstring meta_item : meta_data_in_mmap) {
     MmapAdviseSequential(meta_item);
   }
