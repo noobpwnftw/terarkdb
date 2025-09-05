@@ -448,21 +448,9 @@ void TerarkZipDBOptionsFromEnv(DBOptions& dbo) {
 
   TerarkZipAutoConfigForOnlineDB_DBOptions(dbo, 0);
 
-  MyOverrideInt(dbo, max_background_flushes);
-  MyOverrideInt(dbo, max_background_compactions);
-  MyOverrideInt(dbo, max_background_garbage_collections);
-
+  MyOverrideInt(dbo, max_background_jobs);
   MyOverrideInt(dbo, max_open_files);
   MyOverrideBool(dbo, allow_mmap_populate);
-  dbo.max_background_jobs = dbo.max_background_flushes +
-                            dbo.max_background_compactions +
-                            dbo.max_background_garbage_collections;
-
-  dbo.env->SetBackgroundThreads(
-      dbo.max_background_compactions + dbo.max_background_garbage_collections,
-      TERARKDB_NAMESPACE::Env::LOW);
-  dbo.env->SetBackgroundThreads(dbo.max_background_flushes,
-                                TERARKDB_NAMESPACE::Env::HIGH);
 }
 
 class TerarkBlackListCF : public terark::hash_strmap<> {

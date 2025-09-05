@@ -72,7 +72,6 @@ class ChaosTest {
     options.use_direct_reads = true;
     options.max_background_garbage_collections = 8;
     options.WAL_size_limit_MB = 0;
-    options.use_aio_reads = true;
     options.max_background_jobs = 32;
     options.WAL_ttl_seconds = 0;
     options.enable_thread_tracking = true;
@@ -198,7 +197,6 @@ class ChaosTest {
     options.blob_gc_ratio = 0.1;
     options.create_if_missing = true;
     options.create_missing_column_families = true;
-    options.use_aio_reads = (flags_ & TestAsync) ? true : false;
     options.table_factory.reset(
         TERARKDB_NAMESPACE::NewBlockBasedTableFactory(bbto));
 #ifdef WITH_TERARK_ZIP
