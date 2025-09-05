@@ -148,7 +148,7 @@ struct BlockBasedTableOptions {
   // block size specified here corresponds to uncompressed data.  The
   // actual size of the unit read from disk may be smaller if
   // compression is enabled.  This parameter can be changed dynamically.
-  size_t block_size = 4 * 1024;
+  size_t block_size = 16 * 1024;
 
   // This is used to close a block before it reaches the configured
   // 'block_size'. If the percentage of free space in the current block is less
@@ -250,7 +250,7 @@ struct BlockBasedTableOptions {
   // probably use this as it would reduce the index size.
   // This option only affects newly written tables. When reading existing
   // tables, the information about version is read from the footer.
-  uint32_t format_version = 2;
+  uint32_t format_version = 4;
 
   // Store index blocks on disk in compressed format. Changing this option to
   // false  will avoid the overhead of decompression if index blocks are evicted

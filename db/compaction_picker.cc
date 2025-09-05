@@ -1987,8 +1987,7 @@ Compaction* CompactionPicker::PickCompositeCompaction(
   };
   uint64_t pick_size =
       size_t(MaxFileSizeForLevel(mutable_cf_options, std::max(1, input.level),
-                                 ioptions_.compaction_style) *
-             2);
+                                 ioptions_.compaction_style) * 8 / 5);
   auto estimate_size = [](const MapSstElement& element) {
     uint64_t sum = 0;
     for (auto& l : element.link) {
