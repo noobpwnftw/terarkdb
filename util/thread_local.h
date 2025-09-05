@@ -10,6 +10,7 @@
 #pragma once
 
 #include <functional>
+#include <cstdint>
 
 #include "rocksdb/terark_namespace.h"
 #include "util/autovector.h"
