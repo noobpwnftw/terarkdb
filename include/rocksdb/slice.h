@@ -24,6 +24,7 @@
 
 #include <cstdio>
 #include <string>
+#include <cstdint>
 
 #ifdef __cpp_lib_string_view
 #include <string_view>

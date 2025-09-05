@@ -1987,8 +1987,7 @@ Compaction* CompactionPicker::PickCompositeCompaction(
   };
   uint64_t pick_size =
       size_t(MaxFileSizeForLevel(mutable_cf_options, std::max(1, input.level),
-                                 ioptions_.compaction_style) *
-             2);
+                                 ioptions_.compaction_style) * 13 / 5);
   auto estimate_size = [](const MapSstElement& element) {
     uint64_t sum = 0;
     for (auto& l : element.link) {
@@ -2037,7 +2036,7 @@ Compaction* CompactionPicker::PickCompositeCompaction(
     // always try pick prev range
     iter->SeekForPrev(key);
     assert(iter->Valid());
-    do {
+    while (sum < pick_size / 2) {
       iter->Prev();
       if (!iter->Valid() || unique_check.count(iter->key()) > 0) {
         break;
@@ -2051,7 +2050,7 @@ Compaction* CompactionPicker::PickCompositeCompaction(
       AssignUserKey(range.start, map_element.smallest_key);
       sum += estimate_size(map_element);
       push_unique(iter->key());
-    } while (sum < pick_size);
+    }
     input_range.emplace_back(SelectedRange(std::move(range), weight));
     if (input_range.size() >= max_subcompactions) {
       break;
