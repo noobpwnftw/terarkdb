@@ -24,10 +24,6 @@
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #endif
 
-#ifdef WITH_BOOSTLIB
-#include <boost/fiber/all.hpp>
-#endif
-
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
 #endif
@@ -939,23 +935,19 @@ void CompactionJob::GenSubcompactionBoundaries(int max_usable_threads) {
   }
 
   // Group the ranges into subcompactions
-  const double min_file_fill_percent = 4.0 / 5;
+  int subcompactions =
+      std::min({max_usable_threads, static_cast<int>(ranges.size()),
+                static_cast<int>(c->max_subcompactions())});
+
   int base_level = v->storage_info()->base_level();
-  uint64_t max_output_files = static_cast<uint64_t>(std::ceil(
-      sum / min_file_fill_percent /
+  uint64_t target_range_size = std::max(sum / subcompactions,
       MaxFileSizeForLevel(
           *(c->mutable_cf_options()), out_lvl,
           c->immutable_cf_options()->compaction_style, base_level,
-          c->immutable_cf_options()->level_compaction_dynamic_level_bytes)));
-  int subcompactions =
-      std::min({max_usable_threads, static_cast<int>(ranges.size()),
-                static_cast<int>(c->max_subcompactions()),
-                static_cast<int>(max_output_files)});
+          c->immutable_cf_options()->level_compaction_dynamic_level_bytes));
 
-  if (subcompactions > 1) {
-    double mean = sum * 1.0 / subcompactions;
-    // Greedily add ranges to the subcompaction until the sum of the ranges'
-    // sizes becomes >= the expected mean size of a subcompaction
+  if (sum > target_range_size && subcompactions > 1) {
+    uint64_t cut_threshold = 2 * target_range_size / 5 * 4;
     sum = 0;
     for (size_t i = 0; i < ranges.size() - 1; i++) {
       sum += ranges[i].size;
@@ -964,7 +956,7 @@ void CompactionJob::GenSubcompactionBoundaries(int max_usable_threads) {
         // need to put an end boundary
         continue;
       }
-      if (sum >= mean) {
+      if (sum >= cut_threshold) {
         boundaries_.emplace_back(ExtractUserKey(ranges[i].range.limit));
         sizes_.emplace_back(sum);
         subcompactions--;

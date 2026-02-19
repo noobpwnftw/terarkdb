@@ -62,7 +62,6 @@ class ZenfsRandomAccessFile : public RandomAccessFile {
     target_->Hint((FSRandomAccessFile::AccessPattern)pattern);
   }
   bool use_direct_io() const override { return target_->use_direct_io(); }
-  bool use_aio_reads() const final { return false; }
   bool is_mmap_open() const final { return false; }
   size_t GetRequiredBufferAlignment() const override {
     return target_->GetRequiredBufferAlignment();

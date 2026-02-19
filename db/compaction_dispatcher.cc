@@ -152,7 +152,7 @@ struct string_stream : terark::LittleEndianDataOutput<terark::AutoGrownMemIO> {
 
 template <class T>
 void save_to(string_stream& ss, const T& x) {
-  ss.resize(128 * 1024);
+  ss.reserve(128 * 1024);
   ss << x;
 }
 

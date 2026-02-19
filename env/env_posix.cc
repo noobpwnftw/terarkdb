@@ -60,10 +60,6 @@
 #include "util/thread_local.h"
 #include "util/threadpool_imp.h"
 
-#ifdef WITH_BOOSTLIB
-#include <boost/fiber/operations.hpp>
-#endif
-
 #if __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -862,11 +858,7 @@ class PosixEnv : public Env {
   }
 
   virtual void SleepForMicroseconds(int micros) override {
-#ifdef WITH_BOOSTLIB
-    boost::this_fiber::sleep_for(std::chrono::microseconds(micros));
-#else
     usleep(micros);
-#endif
   }
 
   virtual Status GetHostName(char* name, uint64_t len) override {

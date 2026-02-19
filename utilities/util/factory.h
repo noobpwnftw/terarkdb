@@ -42,11 +42,7 @@ class Factoryable {
 
   TERARKDB_NAMESPACE::Slice reg_name() const;
 
-#ifdef WITH_BOOSTLIB
   struct AutoReg : boost::noncopyable {
-#else
-  struct AutoReg : boost::noncopyable {
-#endif
     typedef function<ProductPtr(CreatorArgs...)> CreatorFunc;
     AutoReg(TERARKDB_NAMESPACE::Slice name, CreatorFunc creator,
             const std::type_info&);

@@ -30,9 +30,6 @@
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
 #endif
-#ifdef WITH_TERARK_ZIP
-#include <terark/thread/fiber_aio.hpp>
-#endif
 
 #include "env/posix_logger.h"
 #include "monitoring/iostats_context_imp.h"
@@ -318,7 +315,6 @@ PosixRandomAccessFile::PosixRandomAccessFile(const std::string& fname, int fd,
     : filename_(fname),
       fd_(fd),
       use_direct_io_(options.use_direct_reads),
-      use_aio_reads_(options.use_aio_reads),
       logical_sector_size_(GetLogicalBufferSize(fd_)) {
   assert(!options.use_direct_reads || !options.use_mmap_reads);
   assert(!options.use_mmap_reads || sizeof(void*) < 8);
@@ -326,28 +322,15 @@ PosixRandomAccessFile::PosixRandomAccessFile(const std::string& fname, int fd,
 
 PosixRandomAccessFile::~PosixRandomAccessFile() { close(fd_); }
 
-bool PosixRandomAccessFile::use_aio_reads() const { return use_aio_reads_; }
-
 static Status PosixFsRead(uint64_t offset, size_t n, Slice* result,
                           char* scratch, int fd_, const std::string& filename_,
-                          bool use_aio_reads_, bool use_direct_io_,
-                          size_t filealign) {
+                          bool use_direct_io_, size_t filealign) {
   Status s;
   ssize_t r = -1;
   size_t left = n;
   char* ptr = scratch;
   while (left > 0) {
-    // Disable AIO read if terark-zip is NOT used.
-#ifndef WITH_TERARK_ZIP
-    use_aio_reads_ = false;
-#endif
-    if (use_aio_reads_) {
-#ifdef WITH_TERARK_ZIP
-      r = terark::fiber_aio_read(fd_, ptr, left, static_cast<off_t>(offset));
-#endif
-    } else {
-      r = pread(fd_, ptr, left, static_cast<off_t>(offset));
-    }
+    r = pread(fd_, ptr, left, static_cast<off_t>(offset));
     if (r <= 0) {
       if (r == -1 && errno == EINTR) {
         continue;
@@ -382,7 +365,7 @@ Status PosixRandomAccessFile::Read(uint64_t offset, size_t n, Slice* result,
     assert(IsSectorAligned(scratch, GetRequiredBufferAlignment()));
   }
 #endif
-  return PosixFsRead(offset, n, result, scratch, fd_, filename_, use_aio_reads_,
+  return PosixFsRead(offset, n, result, scratch, fd_, filename_,
                      use_direct_io_, GetRequiredBufferAlignment());
 }
 
@@ -474,7 +457,6 @@ PosixMmapReadableFile::PosixMmapReadableFile(const int fd,
                                              const EnvOptions& options)
     : fd_(fd), filename_(fname), mmapped_region_(base), length_(length) {
   fd_ = fd_ + 0;  // suppress the warning for used variables
-  use_aio_reads_ = options.use_aio_reads;
   assert(options.use_mmap_reads);
   assert(!options.use_direct_reads);
 }

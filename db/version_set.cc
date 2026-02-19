@@ -4490,26 +4490,31 @@ uint64_t VersionSet::ApproximateSize(Version* v, const Slice& start,
         /*start=*/0, static_cast<uint32_t>(files_brief.num_files - 1));
     assert(idx_start < files_brief.num_files);
 
+    uint64_t idx_end = idx_start;
+    if (v->cfd_->internal_comparator().Compare(
+        files_brief.files[idx_end].largest_key, end) < 0) {
+      idx_end = FindFileInRange(
+        v->cfd_->internal_comparator(), files_brief, end, idx_start,
+                          static_cast<uint32_t>(files_brief.num_files - 1));
+    }
+    assert(idx_end >= idx_start && idx_end < files_brief.num_files);
     // scan all files from the starting position until the ending position
     // inferred from the sorted order
-    for (uint64_t i = idx_start; i < files_brief.num_files; i++) {
-      uint64_t val;
-      val = ApproximateSize(v, files_brief.files[i], end);
-      if (!val) {
-        // the files after this will not have the range
-        break;
-      }
 
-      size += val;
-
-      if (i == idx_start) {
-        // subtract the bytes needed to be scanned to get to the starting
-        // key
-        val = ApproximateSize(v, files_brief.files[i], start);
-        assert(size >= val);
-        size -= val;
-      }
+    if (idx_start != idx_end) {
+      size += ApproximateSize(v, files_brief.files[idx_end], end);
+    } else {
+      size += ApproximateSize(v, files_brief.files[idx_start], end);
     }
+    // scan all the intermediate full files (excluding last)
+    for (uint64_t i = idx_start; i < idx_end; ++i) {
+      size += files_brief.files[i].fd.GetFileSize();
+    }
+    // subtract the bytes needed to be scanned to get to the starting
+    // key
+    uint64_t val = ApproximateSize(v, files_brief.files[idx_start], start);
+    assert(size >= val);
+    size -= val;
   }
 
   return size;

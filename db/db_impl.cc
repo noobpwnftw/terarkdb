@@ -105,13 +105,7 @@
 
 #ifdef WITH_TERARK_ZIP
 #include <table/terark_zip_table.h>
-
-#include <terark/thread/fiber_yield.hpp>
 #include <terark/util/fiber_pool.hpp>
-#endif
-
-#ifdef WITH_BOOSTLIB
-#include <boost/fiber/all.hpp>
 #endif
 
 #ifdef __GNUC__
@@ -2131,99 +2125,6 @@ Status DBImpl::GetImpl(const ReadOptions& read_options,
   return s;
 }
 
-#ifdef WITH_BOOSTLIB
-struct SimpleFiberTls {
-  static constexpr intptr_t MAX_QUEUE_LEN = 256;
-  static constexpr intptr_t DEFAULT_FIBER_CNT = 8;
-  typedef std::function<void()> task_t;
-  intptr_t fiber_count = 0;
-  intptr_t pending_count = 0;
-  terark::FiberYield m_fy;
-  boost::fibers::buffered_channel<task_t> channel;
-
-  SimpleFiberTls(boost::fibers::context** activepp)
-      : m_fy(activepp), channel(MAX_QUEUE_LEN) {
-    update_fiber_count(DEFAULT_FIBER_CNT);
-  }
-
-  void update_fiber_count(intptr_t count) {
-    if (count <= 0) {
-      return;
-    }
-    count = std::min<intptr_t>(count, +MAX_QUEUE_LEN);
-    using boost::fibers::channel_op_status;
-    for (intptr_t i = fiber_count; i < count; ++i) {
-      boost::fibers::fiber([this, i]() {
-        task_t task;
-        while (i < fiber_count &&
-               channel.pop(task) == channel_op_status::success) {
-          task();
-          pending_count--;
-        }
-      }).detach();
-    }
-    fiber_count = count;
-  }
-
-  void push(task_t&& task) {
-    channel.push(std::move(task));
-    pending_count++;
-  }
-
-  bool try_push(const task_t& task) {
-    using boost::fibers::channel_op_status;
-    if (channel.try_push(task) == channel_op_status::success) {
-      pending_count++;
-      return true;
-    }
-    return false;
-  }
-
-  int wait(int timeout_us) {
-    intptr_t old_pending_count = pending_count;
-    if (old_pending_count == 0) {
-      return 0;
-    }
-
-    using namespace std::chrono;
-
-    // do not use sleep_for, because we want to return as soon as possible
-    // boost::this_fiber::sleep_for(microseconds(timeout_us));
-    // return tls->pending_count - old_pending_count;
-
-    auto start = std::chrono::system_clock::now();
-    while (true) {
-      // boost::this_fiber::yield(); // wait once
-      m_fy.unchecked_yield();
-      if (pending_count > 0) {
-        auto now = system_clock::now();
-        auto dur = duration_cast<microseconds>(now - start).count();
-        if (dur >= timeout_us) {
-          return int(pending_count - old_pending_count - 1);  // negtive
-        }
-      } else {
-        break;
-      }
-    }
-    return int(old_pending_count);
-  }
-
-  int wait() {
-    intptr_t cnt = pending_count;
-    while (pending_count > 0) {
-      // boost::this_fiber::yield(); // wait once
-      m_fy.unchecked_yield();
-    }
-    return int(cnt);
-  }
-};
-
-// ensure fiber thread locals are constructed first
-// because SimpleFiberTls.channel must be destructed first
-static thread_local SimpleFiberTls gt_fibers(
-    boost::fibers::context::active_pp());
-#endif  // WITH_BOOSTLIB
-
 std::vector<Status> DBImpl::MultiGet(
     const ReadOptions& read_options,
     const std::vector<ColumnFamilyHandle*>& column_family,
@@ -2326,36 +2227,9 @@ std::vector<Status> DBImpl::MultiGet(
     }
     counting--;
   };
-#ifdef WITH_BOOSTLIB
-  if (read_options.aio_concurrency && immutable_db_options_.use_aio_reads) {
-#if 0
-    static thread_local terark::RunOnceFiberPool fiber_pool(16);
-    // current calling fiber's list head, can be treated as a handle
-    int myhead = -1; // must be initialized to -1
-    for (size_t i = 0; i < num_keys; ++i) {
-      fiber_pool.submit(myhead, get_one, i);
-    }
-    fiber_pool.reap(myhead);
-    assert(0 == counting);
-#else
-    auto tls = &gt_fibers;
-    tls->update_fiber_count(read_options.aio_concurrency);
-    for (size_t i = 0; i < num_keys; ++i) {
-      tls->push([&, i]() { get_one(i); });
-    }
-    while (counting) {
-      // boost::this_fiber::yield();
-      tls->m_fy.unchecked_yield();
-    }
-#endif
-  } else {
-#endif
-    for (size_t i = 0; i < num_keys; ++i) {
-      get_one(i);
-    }
-#ifdef WITH_BOOSTLIB
+  for (size_t i = 0; i < num_keys; ++i) {
+    get_one(i);
   }
-#endif
 
   // Post processing (decrement reference counts and record statistics)
   PERF_TIMER_GUARD(get_post_process_time);
@@ -3929,155 +3803,6 @@ Status DB::DestroyColumnFamilyHandle(ColumnFamilyHandle* column_family) {
 }
 
 DB::~DB() {}
-
-#ifdef WITH_BOOSTLIB
-void DB::CallOnMainStack(const std::function<void()>& fn) {
-  gt_fibers.m_fy.sched()->call_on_main_stack(fn);
-}
-
-void DB::SubmitAsyncTask(std::function<void()> fn) {
-  gt_fibers.push(std::move(fn));
-}
-
-void DB::SubmitAsyncTask(std::function<void()> fn, size_t aio_concurrency) {
-  auto tls = &gt_fibers;
-  tls->update_fiber_count(aio_concurrency);
-  tls->push(std::move(fn));
-}
-
-bool DB::TrySubmitAsyncTask(const std::function<void()>& fn) {
-  auto tls = &gt_fibers;
-  return tls->try_push(fn);
-}
-
-bool DB::TrySubmitAsyncTask(const std::function<void()>& fn,
-                            size_t aio_concurrency) {
-  auto tls = &gt_fibers;
-  tls->update_fiber_count(aio_concurrency);
-  return tls->try_push(fn);
-}
-
-void DB::GetAsync(const ReadOptions& ro, ColumnFamilyHandle* cfh,
-                  std::string key, std::string* value, GetAsyncCallback cb) {
-  using namespace boost::fibers;
-  using std::move;
-  auto tls = &gt_fibers;
-  tls->update_fiber_count(ro.aio_concurrency);
-  tls->push([=, key = move(key), cb = move(cb)]() mutable {
-    auto s = this->Get(ro, cfh, key, value);
-    cb(move(s), move(key), value);
-  });
-}
-
-void DB::GetAsync(const ReadOptions& ro, std::string key, std::string* value,
-                  GetAsyncCallback cb) {
-  using std::move;
-  GetAsync(ro, DefaultColumnFamily(), move(key), value, move(cb));
-}
-
-void DB::GetAsync(const ReadOptions& ro, ColumnFamilyHandle* cfh,
-                  std::string key, GetAsyncCallback cb) {
-  using namespace boost::fibers;
-  using std::move;
-  auto tls = &gt_fibers;
-  tls->update_fiber_count(ro.aio_concurrency);
-  tls->push([=, key = move(key), cb = move(cb)]() mutable {
-    std::string value;
-    Status s = this->Get(ro, cfh, key, &value);
-    cb(move(s), move(key), &value);
-  });
-}
-
-void DB::GetAsync(const ReadOptions& ro, std::string key, GetAsyncCallback cb) {
-  using std::move;
-  GetAsync(ro, DefaultColumnFamily(), move(key), move(cb));
-}
-
-///@returns == 0 indicate there is nothing to wait
-///          < 0 indicate number of finished GetAsync/GetFuture requests after
-///              timeout
-///          > 0 indicate number of all GetAsync/GetFuture requests have
-///              finished within timeout
-int DB::WaitAsync(int timeout_us) { return gt_fibers.wait(timeout_us); }
-
-int DB::WaitAsync() { return gt_fibers.wait(); }
-#endif  // WITH_BOOSTLIB
-
-// using future needs boost symbols to be exported, but we don't want to
-// export boost symbols
-#if defined(TERARKDB_WITH_AIO_FUTURE)
-
-// boost::fibers::promise has some problem for being captured by
-// std::move for std::function
-// use intrusive_ptr to workaround (capture by copy intrusive_ptr)
-template <class T>
-struct DB_Promise {
-  DB_Promise(std::string& k) : key(std::move(k)) {}
-
-  intptr_t refcnt = 0;
-  std::string key;
-  boost::fibers::promise<T> pr;
-
-  friend void intrusive_ptr_add_ref(DB_Promise* p) { p->refcnt++; }
-
-  friend void intrusive_ptr_release(DB_Promise* p) {
-    if (0 == --p->refcnt) delete p;
-  }
-};
-
-template <class T>
-struct DB_PromisePtr : boost::intrusive_ptr<DB_Promise<T>> {
-  DB_PromisePtr(std::string& k)
-      : boost::intrusive_ptr<DB_Promise<T>>(new DB_Promise<T>(k)) {}
-};
-
-future<std::tuple<Status, std::string, std::string*>> DB::GetFuture(
-    const ReadOptions& ro, ColumnFamilyHandle* cfh, std::string key,
-    std::string* value) {
-  using namespace boost::fibers;
-  using std::move;
-  auto tls = &gt_fibers;
-  tls->update_fiber_count(ro.aio_concurrency);
-  DB_PromisePtr<std::tuple<Status, std::string, std::string*>> p(key);
-  auto fu = p->pr.get_future();
-  tls->push([this, ro, cfh, p, value]() {
-    std::tuple<Status, std::string, std::string*> result;
-    std::get<0>(result) = this->Get(ro, cfh, p->key, value);
-    std::get<1>(result) = std::move(p->key);
-    std::get<2>(result) = value;
-    p->pr.set_value(std::move(result));
-  });
-  return fu;
-}
-
-future<std::tuple<Status, std::string, std::string*>> DB::GetFuture(
-    const ReadOptions& ro, std::string key, std::string* value) {
-  return GetFuture(ro, DefaultColumnFamily(), std::move(key), value);
-}
-
-future<std::tuple<Status, std::string, std::string>> DB::GetFuture(
-    const ReadOptions& ro, ColumnFamilyHandle* cfh, std::string key) {
-  using namespace boost::fibers;
-  using std::move;
-  auto tls = &gt_fibers;
-  tls->update_fiber_count(ro.aio_concurrency);
-  DB_PromisePtr<std::tuple<Status, std::string, std::string>> p(key);
-  auto fu = p->pr.get_future();
-  tls->push([this, ro, cfh, p]() {
-    std::tuple<Status, std::string, std::string> result;
-    std::get<0>(result) = this->Get(ro, cfh, p->key, &std::get<2>(result));
-    std::get<1>(result) = std::move(p->key);
-    p->pr.set_value(std::move(result));
-  });
-  return fu;
-}
-
-future<std::tuple<Status, std::string, std::string>> DB::GetFuture(
-    const ReadOptions& ro, std::string key) {
-  return GetFuture(ro, DefaultColumnFamily(), std::move(key));
-}
-
-#endif  // TERARKDB_WITH_AIO_FUTURE
 
 Status DBImpl::Close() {
   if (!closed_) {

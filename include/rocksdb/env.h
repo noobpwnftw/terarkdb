@@ -99,8 +99,6 @@ struct EnvOptions {
   // If true, set the FD_CLOEXEC on open fd.
   bool set_fd_cloexec = true;
 
-  bool use_aio_reads = false;
-
   // Allows OS to incrementally sync files to disk while they are being
   // written, in the background. Issue one request for every bytes_per_sync
   // written. 0 turns it off.
@@ -734,8 +732,6 @@ class RandomAccessFile {
   // Indicates the upper layers if the current RandomAccessFile implementation
   // uses direct IO.
   virtual bool use_direct_io() const { return false; }
-
-  virtual bool use_aio_reads() const { return false; }
 
   virtual bool is_mmap_open() const { return false; }
 
@@ -1508,7 +1504,6 @@ class RandomAccessFileWrapper : public RandomAccessFile {
   }
   void Hint(AccessPattern pattern) override { target_->Hint(pattern); }
   bool use_direct_io() const override { return target_->use_direct_io(); }
-  bool use_aio_reads() const override { return target_->use_aio_reads(); }
   bool is_mmap_open() const override { return target_->is_mmap_open(); }
   size_t GetRequiredBufferAlignment() const override {
     return target_->GetRequiredBufferAlignment();
