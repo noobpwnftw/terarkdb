@@ -414,8 +414,8 @@ Status TerarkZipTableBuilder::Add(const Slice& key,
   assert(userKey.size() >= prefixLen_);
   auto ShouldStartBuild = [&] {
     size_t indexSize = UintVecMin0::compute_mem_size_by_max_val(
-        r22_->stat.sumKeyLen, r22_->stat.keyCount);
-    size_t indexBuildMemSize = r22_->stat.sumKeyLen + indexSize;
+        r22_->stat.sumKeyLen - r22_->stat.sumPrefixLen, r22_->stat.keyCount);
+    size_t indexBuildMemSize = r22_->stat.sumKeyLen - r22_->stat.sumPrefixLen + indexSize;
     if (terark_unlikely(indexBuildMemSize > singleIndexMaxSize_)) {
       return true;
     }
@@ -2133,7 +2133,7 @@ Status TerarkZipTableBuilder::WriteSSTFileMulti(
   {
     size_t real_size =
         TerarkZipMultiOffsetInfo::calc_size(prefixBuildInfos_.size()) +
-        mmapIndexFile.size + mmapStoreFile.size + typeSize;
+        mmapIndexFile.size + mmapStoreFile.size + mmapZipStoreFile.size + typeSize;
     size_t block_size, last_allocated_block;
     file_->writable_file()->GetPreallocationStatus(&block_size,
                                                    &last_allocated_block);
@@ -2534,7 +2534,7 @@ bool TerarkZipTableBuilder::MergeRangeStatus(RangeStatus* aa, RangeStatus* bb,
       abi.type == info_t::crit_bit_trie) {
     return false;
   }
-  return aai.estimate_size + bbi.estimate_size >= aai.estimate_size * 0.9;
+  return (aai.estimate_size + bbi.estimate_size) >= abi.estimate_size * 0.9;
 }
 
 TableBuilder* createTerarkZipTableBuilder(

@@ -152,7 +152,7 @@ struct string_stream : terark::LittleEndianDataOutput<terark::AutoGrownMemIO> {
 
 template <class T>
 void save_to(string_stream& ss, const T& x) {
-  ss.resize(128 * 1024);
+  ss.reserve(128 * 1024);
   ss << x;
 }
 
@@ -211,7 +211,7 @@ using FileInfo = CompactionWorkerResult::FileInfo;
 AJSON(FileInfo, smallest, largest, file_name, smallest_seqno, largest_seqno,
       file_size, marked_for_compaction);
 
-AJSON(CompactionWorkerResult, status, actual_start, actual_end, files, stat_all,
+AJSON(CompactionWorkerResult, status, actual_start, actual_end, files,
       time_us);
 
 AJSON(FileDescriptor, packed_number_and_path_id, file_size, smallest_seqno,
@@ -757,10 +757,6 @@ std::string RemoteCompactionDispatcher::Worker::DoCompaction(Slice data) {
 
     ~SecondPassIterStorage() {
       if (input.get() != nullptr) {
-        if (compaction_filter) {
-          // assert(!ExistFutureAction(compaction_filter));
-          EraseFutureAction(compaction_filter);
-        }
         input.set(nullptr);
         auto merge_ptr = reinterpret_cast<MergeHelper*>(&merge);
         merge_ptr->~MergeHelper();
@@ -1059,34 +1055,6 @@ std::string RemoteCompactionDispatcher::Worker::DoCompaction(Slice data) {
     dependence.clear();
   }
 
-  if (compaction_filter) {
-    if (ReapMatureAction(compaction_filter, &result.stat_all)) {
-      fprintf(stderr, "INFO: ReapMatureAction(compaction_filter=%p) = %s\n",
-              compaction_filter, result.stat_all.c_str());
-    } else {
-      fprintf(stderr, "ERROR: ReapMatureAction(compaction_filter=%p) = false\n",
-              compaction_filter);
-    }
-  } else {
-    fprintf(
-        stderr,
-        "INFO: compaction_filter = null, name = { filter: %s, factory: %s }\n",
-        context.compaction_filter.c_str(),
-        context.compaction_filter_factory.c_str());
-  }
-  if (second_pass_iter_storage.compaction_filter) {
-    bool ret = EraseFutureAction(second_pass_iter_storage.compaction_filter);
-    fprintf(stderr,
-            "INFO: EraseFutureAction(secondpass.compaction_filter=%p) = %d\n",
-            second_pass_iter_storage.compaction_filter, ret);
-  } else {
-    fprintf(stderr,
-            "INFO: secondpass.compaction_filter = null, name = { filter: %s, "
-            "factory: %s }\n",
-            context.compaction_filter.c_str(),
-            context.compaction_filter_factory.c_str());
-  }
-
   c_iter.reset();
   input.set(nullptr);
 
@@ -1122,8 +1090,6 @@ void RemoteCompactionDispatcher::Worker::DebugSerializeCheckResult(Slice data) {
     str << "    seq__largest = " << f.largest_seqno
         << "  key__largest = " << f.largest.DebugString(true) << "\n";
   }
-  str << "  stat_all[size=" << res.stat_all.size() << "] = " << res.stat_all
-      << "\n";
   intptr_t wlen = ::write(2, str.data(), str.size());
   if (size_t(wlen) != str.size()) {
     abort();

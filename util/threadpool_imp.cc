@@ -273,11 +273,11 @@ void* ThreadPoolImpl::Impl::BGThreadWrapper(void* arg) {
   // uninitialized
   ThreadStatus::ThreadType thread_type = ThreadStatus::NUM_THREAD_TYPES;
   switch (tp->GetThreadPriority()) {
-    case Env::Priority::FORCE:
-      thread_type = ThreadStatus::HIGH_PRIORITY;
-      break;
     case Env::Priority::HIGH:
       thread_type = ThreadStatus::HIGH_PRIORITY;
+      break;
+    case Env::Priority::FORCE:
+      thread_type = ThreadStatus::LOW_PRIORITY;
       break;
     case Env::Priority::LOW:
       thread_type = ThreadStatus::LOW_PRIORITY;

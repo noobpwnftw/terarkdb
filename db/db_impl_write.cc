@@ -253,7 +253,7 @@ Status DBImpl::WriteImpl(const WriteOptions& write_options,
         valid_batches += writer->batch_cnt;
         if (writer->ShouldWriteToMemtable()) {
           total_count += WriteBatchInternal::Count(writer->batch);
-          parallel = parallel && !writer->batch->HasMerge();
+          //parallel = parallel && !writer->batch->HasMerge();
         }
 
         total_byte_size = WriteBatchInternal::AppendedByteSize(

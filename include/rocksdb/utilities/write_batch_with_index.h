@@ -213,11 +213,18 @@ class WriteBatchWithIndex : public WriteBatchBase {
   // MergeInProgress status may be returned.
   Status GetFromBatch(ColumnFamilyHandle* column_family,
                       const DBOptions& options, const Slice& key,
+                      LazyBuffer* value);
+  Status GetFromBatch(ColumnFamilyHandle* column_family,
+                      const DBOptions& options, const Slice& key,
                       std::string* value);
 
   // Similar to previous function but does not require a column_family.
   // Note:  An InvalidArgument status will be returned if there are any Merge
   // operators for this key.  Use previous method instead.
+  Status GetFromBatch(const DBOptions& options, const Slice& key,
+                      LazyBuffer* value) {
+    return GetFromBatch(nullptr, options, key, value);
+  }
   Status GetFromBatch(const DBOptions& options, const Slice& key,
                       std::string* value) {
     return GetFromBatch(nullptr, options, key, value);

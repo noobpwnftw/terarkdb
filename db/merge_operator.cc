@@ -22,14 +22,14 @@ bool MergeOperator::FullMergeV2(const MergeOperationInput& merge_in,
   std::deque<std::string> operand_list_str;
   for (auto& op : merge_in.operand_list) {
     if (!Fetch(op, &merge_out->new_value)) {
-      return true;
+      return false;
     }
     operand_list_str.emplace_back(op.data(), op.size());
   }
   const Slice* existing_value = nullptr;
   if (merge_in.existing_value != nullptr) {
     if (!Fetch(*merge_in.existing_value, &merge_out->new_value)) {
-      return true;
+      return false;
     }
     existing_value = &merge_in.existing_value->slice();
   }
@@ -74,7 +74,7 @@ bool AssociativeMergeOperator::FullMergeV2(
     if ((existing_value != nullptr &&
          !Fetch(*existing_value, &merge_out->new_value)) ||
         !Fetch(operand, &merge_out->new_value)) {
-      return true;
+      return false;
     }
     temp_value.clear();
     const Slice* existing_value_slice =
@@ -99,7 +99,7 @@ bool AssociativeMergeOperator::PartialMerge(const Slice& key,
                                             LazyBuffer* new_value,
                                             Logger* logger) const {
   if (!Fetch(left_operand, new_value) || !Fetch(right_operand, new_value)) {
-    return true;
+    return false;
   }
   return Merge(key, &left_operand.slice(), right_operand.slice(),
                new_value->trans_to_string(), logger);

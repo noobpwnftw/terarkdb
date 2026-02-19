@@ -802,22 +802,21 @@ void WriteBatchWithIndex::Clear() { rep->Clear(); }
 
 Status WriteBatchWithIndex::GetFromBatch(ColumnFamilyHandle* column_family,
                                          const DBOptions& options,
-                                         const Slice& key, std::string* value) {
+                                         const Slice& key,
+                                         LazyBuffer* value) {
   Status s;
   MergeContext merge_context;
   const ImmutableDBOptions immuable_db_options(options);
 
-  LazyBuffer lazy_value(value);
   WriteBatchWithIndexInternal::Result result =
       WriteBatchWithIndexInternal::GetFromBatch(
           immuable_db_options, this, column_family, key, &merge_context,
-          rep->GetComparator(column_family), &lazy_value, rep->overwrite_key,
+          rep->GetComparator(column_family), value, rep->overwrite_key,
           &s);
 
   switch (result) {
     case WriteBatchWithIndexInternal::Result::kFound:
       assert(s.ok());
-      s = std::move(lazy_value).dump(value);
       break;
     case WriteBatchWithIndexInternal::Result::kError:
       // use returned status
@@ -833,6 +832,18 @@ Status WriteBatchWithIndex::GetFromBatch(ColumnFamilyHandle* column_family,
       assert(false);
   }
 
+  return s;
+}
+
+Status WriteBatchWithIndex::GetFromBatch(ColumnFamilyHandle* column_family,
+                                         const DBOptions& options,
+                                         const Slice& key,
+                                         std::string* value) {
+  LazyBuffer lazy_value(value);
+  auto s = GetFromBatch(column_family, options, key, &lazy_value);
+  if (s.ok()) {
+    s = std::move(lazy_value).dump(value);
+  }
   return s;
 }
 

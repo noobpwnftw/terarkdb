@@ -1196,7 +1196,6 @@ void DBImpl::NotifyOnCompactionCompleted(
     info.table_properties = c->GetOutputTableProperties();
     info.compaction_reason = c->compaction_reason();
     info.compression = c->output_compression();
-    info.transient_stat = c->transient_stat();
     for (size_t i = 0; i < c->num_input_levels(); ++i) {
       for (const auto fmd : *c->inputs(i)) {
         auto fn = TableFileName(c->immutable_cf_options()->cf_paths,
@@ -1496,7 +1495,7 @@ Status DBImpl::RunManualCompaction(
       ca->prepicked_compaction->compaction = compaction;
       manual.incomplete = false;
       bg_compaction_scheduled_++;
-      env_->Schedule(&DBImpl::BGWorkCompaction, ca, Env::Priority::LOW, this,
+      env_->Schedule(&DBImpl::BGWorkCompaction, ca, Env::Priority::FORCE, this,
                      &DBImpl::UnscheduleCallback);
       scheduled = true;
     }
@@ -2643,7 +2642,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
       // until we make a copy in the following code
       TEST_SYNC_POINT("DBImpl::BackgroundCompaction():BeforePickCompaction");
       c.reset(cfd->PickCompaction(*mutable_cf_options, snapshots_.GetAll(),
-                                  log_buffer));
+                                  log_buffer, HasPendingManualCompaction()));
       TEST_SYNC_POINT("DBImpl::BackgroundCompaction():AfterPickCompaction");
 
       if (c != nullptr) {

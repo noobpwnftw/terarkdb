@@ -1390,7 +1390,23 @@ Compaction* CompactionPicker::PickRangeCompaction(
     return false;
   };
   bool has_start = false;
-  size_t max_compaction_bytes = mutable_cf_options.max_compaction_bytes;
+  size_t total_level_size = 0;
+  for (begin == nullptr ? iter->SeekToFirst() : iter->Seek(begin->Encode());
+       iter->Valid(); iter->Next()) {
+    if (end != nullptr && uc->Compare(ExtractUserKey(iter->key()),
+                                      end->user_key()) >= 0) {
+      break;
+    }
+    MapSstElement e;
+    if (ReadMapElement(e, iter.get(), log_buffer, cf_name)) {
+      total_level_size += e.EstimateSize();
+    }
+  }
+  size_t target_subcompact_size = max_subcompactions > 0
+      ? std::max<size_t>(total_level_size / max_subcompactions,
+                         MaxFileSizeForLevel(mutable_cf_options, std::max(1, level),
+                                             ioptions_.compaction_style) * 8 / 5)
+      : mutable_cf_options.max_compaction_bytes;
   size_t subcompact_size = 0;
   for (begin == nullptr ? iter->SeekToFirst() : iter->Seek(begin->Encode());
        iter->Valid(); iter->Next()) {
@@ -1402,7 +1418,7 @@ Compaction* CompactionPicker::PickRangeCompaction(
     }
     if (has_start) {
       if (!need_break && need_compact(map_element)) {
-        if (subcompact_size < max_compaction_bytes) {
+        if (subcompact_size < target_subcompact_size) {
           subcompact_size += map_element.EstimateSize();
           AssignUserKey(range.limit, map_element.largest_key);
         } else {
@@ -1987,8 +2003,7 @@ Compaction* CompactionPicker::PickCompositeCompaction(
   };
   uint64_t pick_size =
       size_t(MaxFileSizeForLevel(mutable_cf_options, std::max(1, input.level),
-                                 ioptions_.compaction_style) *
-             2);
+                                 ioptions_.compaction_style) * 8 / 5);
   auto estimate_size = [](const MapSstElement& element) {
     uint64_t sum = 0;
     for (auto& l : element.link) {
@@ -2201,7 +2216,8 @@ class LevelCompactionBuilder {
   Compaction* PickCompaction();
 
   // Pick lazy compaction
-  Compaction* PickLazyCompaction(const std::vector<SequenceNumber>& snapshots);
+  Compaction* PickLazyCompaction(const std::vector<SequenceNumber>& snapshots,
+                                   bool has_pending_manual);
 
   // Pick the initial files to compact to the next level. (or together
   // in Intra-L0 compactions)
@@ -2432,7 +2448,7 @@ Compaction* LevelCompactionBuilder::PickCompaction() {
 }
 
 Compaction* LevelCompactionBuilder::PickLazyCompaction(
-    const std::vector<SequenceNumber>& snapshots) {
+    const std::vector<SequenceNumber>& snapshots, bool has_pending_manual) {
   using SortedRun = CompactionPicker::SortedRun;
   std::vector<SortedRun> sorted_runs(vstorage_->num_levels());
   int bottommost_level = vstorage_->num_non_empty_levels() - 1;
@@ -2856,6 +2872,9 @@ Compaction* LevelCompactionBuilder::PickLazyCompaction(
       }
     }
   }
+  if (has_pending_manual && bottommost_level >= 0) {
+    sorted_runs[bottommost_level].skip_composite = true;
+  }
   sorted_runs.erase(sorted_runs.begin());
   auto c =
       picker->PickCompositeCompaction(cf_name_, mutable_cf_options_, vstorage_,
@@ -2994,11 +3013,11 @@ bool LevelCompactionBuilder::PickIntraL0Compaction() {
 Compaction* LevelCompactionPicker::PickCompaction(
     const std::string& cf_name, const MutableCFOptions& mutable_cf_options,
     VersionStorageInfo* vstorage, const std::vector<SequenceNumber>& snapshots,
-    LogBuffer* log_buffer) {
+    LogBuffer* log_buffer, bool has_pending_manual) {
   LevelCompactionBuilder builder(cf_name, vstorage, this, log_buffer,
                                  mutable_cf_options, ioptions_);
   if (ioptions_.enable_lazy_compaction) {
-    return builder.PickLazyCompaction(snapshots);
+    return builder.PickLazyCompaction(snapshots, has_pending_manual);
   } else {
     return builder.PickCompaction();
   }

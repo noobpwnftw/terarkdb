@@ -276,7 +276,8 @@ class ColumnFamilyData {
   // REQUIRES: DB mutex held
   Compaction* PickCompaction(const MutableCFOptions& mutable_options,
                              const std::vector<SequenceNumber>& snapshots,
-                             LogBuffer* log_buffer);
+                             LogBuffer* log_buffer,
+                             bool has_pending_manual);
 
   Compaction* PickGarbageCollection(const MutableCFOptions& mutable_options,
                                     LogBuffer* log_buffer);

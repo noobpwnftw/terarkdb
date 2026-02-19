@@ -60,10 +60,6 @@
 #include "util/thread_local.h"
 #include "util/threadpool_imp.h"
 
-#ifdef WITH_BOOSTLIB
-#include <boost/fiber/operations.hpp>
-#endif
-
 #if __clang__
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -862,11 +858,7 @@ class PosixEnv : public Env {
   }
 
   virtual void SleepForMicroseconds(int micros) override {
-#ifdef WITH_BOOSTLIB
-    boost::this_fiber::sleep_for(std::chrono::microseconds(micros));
-#else
     usleep(micros);
-#endif
   }
 
   virtual Status GetHostName(char* name, uint64_t len) override {
@@ -1047,10 +1039,9 @@ PosixEnv::PosixEnv()
 
 void PosixEnv::Schedule(void (*function)(void* arg1), void* arg, Priority pri,
                         void* tag, void (*unschedFunction)(void* arg)) {
-  assert(pri >= Priority::BOTTOM && pri <= Priority::FORCE);
+  assert(pri >= Priority::BOTTOM && pri <= Priority::HIGH);
   if (pri == Priority::FORCE) {
-    // TODO, maybe should use random of [HIGH , LOW] pool
-    thread_pools_[Priority::HIGH].Schedule(function, arg, tag, unschedFunction,
+    thread_pools_[Priority::LOW].Schedule(function, arg, tag, unschedFunction,
                                            true);
   } else {
     thread_pools_[pri].Schedule(function, arg, tag, unschedFunction);

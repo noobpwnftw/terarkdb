@@ -184,7 +184,6 @@ struct CompactionWorkerResult {
     uint8_t marked_for_compaction;
   };
   std::vector<FileInfo> files;
-  std::string stat_all;
   size_t time_us = 0;
 };
 
@@ -432,10 +431,6 @@ class Compaction {
                               const std::vector<CompactionInputFiles>& inputs,
                               Slice* smallest_key, Slice* largest_key);
 
-  const std::vector<TableTransientStat>& transient_stat() const {
-    return transient_stat_;
-  }
-  std::vector<TableTransientStat>& transient_stat() { return transient_stat_; }
   std::unordered_map<uint64_t, uint64_t>& current_blob_overlap_scores() const;
 
  private:
@@ -529,8 +524,6 @@ class Compaction {
   // Reason for compaction
   CompactionReason compaction_reason_;
 
-  // per sub compact
-  std::vector<TableTransientStat> transient_stat_;
 };
 
 // Utility function

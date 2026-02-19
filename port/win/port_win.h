@@ -267,10 +267,9 @@ inline void cacheline_aligned_free(void* memblock) {
 #endif
 
 static inline void AsmVolatilePause() {
-#if defined(_M_IX86) || defined(_M_X64)
+#if defined(_M_IX86) || defined(_M_X64) || defined(_M_ARM64) || defined(_M_ARM)
   YieldProcessor();
 #endif
-  // it would be nice to get "wfe" on ARM here
 }
 
 extern int PhysicalCoreID();

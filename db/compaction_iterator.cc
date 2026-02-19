@@ -701,7 +701,13 @@ void CompactionIterator::NextFromInput() {
         current_key_.UpdateInternalKey(ikey_.sequence, ikey_.type);
         key_ = current_key_.GetInternalKey();
         ikey_.user_key = current_key_.GetUserKey();
-        valid_ = true;
+        // Apply compaction filter to the merged result. MergeUntil
+        // filters individual merge operands but not the base Put value
+        // nor the final merged kTypeValue output.
+        InvokeFilterIfNeeded(&need_skip, &skip_until);
+        if (!need_skip) {
+          valid_ = true;
+        }
       } else {
         // all merge operands were filtered out. reset the user key, since the
         // batch consumed by the merge operator should not shadow any keys

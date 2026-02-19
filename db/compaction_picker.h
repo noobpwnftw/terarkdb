@@ -104,7 +104,8 @@ class CompactionPicker {
   virtual Compaction* PickCompaction(
       const std::string& cf_name, const MutableCFOptions& mutable_cf_options,
       VersionStorageInfo* vstorage,
-      const std::vector<SequenceNumber>& snapshots, LogBuffer* log_buffer) = 0;
+      const std::vector<SequenceNumber>& snapshots, LogBuffer* log_buffer,
+      bool has_pending_manual) = 0;
 
   // Pick compaction which level has map or link sst
   Compaction* PickGarbageCollection(const std::string& cf_name,
@@ -330,7 +331,8 @@ class LevelCompactionPicker : public CompactionPicker {
                              const MutableCFOptions& mutable_cf_options,
                              VersionStorageInfo* vstorage,
                              const std::vector<SequenceNumber>& snapshots,
-                             LogBuffer* log_buffer) override;
+                             LogBuffer* log_buffer,
+                             bool has_pending_manual) override;
 
   bool NeedsCompaction(const VersionStorageInfo* vstorage) const override;
 
@@ -353,7 +355,8 @@ class NullCompactionPicker : public CompactionPicker {
                              const MutableCFOptions& /*mutable_cf_options*/,
                              VersionStorageInfo* /*vstorage*/,
                              const std::vector<SequenceNumber>& /*snapshots*/,
-                             LogBuffer* /*log_buffer*/) override {
+                             LogBuffer* /*log_buffer*/,
+                             bool /*has_pending_manual*/) override {
     return nullptr;
   }
 

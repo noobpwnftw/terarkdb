@@ -24,10 +24,6 @@
 #pragma GCC diagnostic ignored "-Wunused-parameter"
 #endif
 
-#ifdef WITH_BOOSTLIB
-#include <boost/fiber/all.hpp>
-#endif
-
 #ifdef __GNUC__
 #pragma GCC diagnostic pop
 #endif
@@ -173,8 +169,6 @@ struct CompactionJob::SubcompactionState {
     bool finished;
     std::shared_ptr<const TableProperties> table_properties;
   };
-  std::string stat_all;
-
   // State kept for output being generated
   std::vector<Output> outputs;
   std::unique_ptr<WritableFileWriter> outfile;
@@ -939,23 +933,24 @@ void CompactionJob::GenSubcompactionBoundaries(int max_usable_threads) {
   }
 
   // Group the ranges into subcompactions
-  const double min_file_fill_percent = 4.0 / 5;
+  int subcompactions =
+      std::min({max_usable_threads, static_cast<int>(ranges.size()),
+                static_cast<int>(c->max_subcompactions())});
+
+  if (subcompactions <= 0) {
+    sizes_.emplace_back(sum);
+    return;
+  }
+
   int base_level = v->storage_info()->base_level();
-  uint64_t max_output_files = static_cast<uint64_t>(std::ceil(
-      sum / min_file_fill_percent /
+  uint64_t target_range_size = std::max(sum / subcompactions,
       MaxFileSizeForLevel(
           *(c->mutable_cf_options()), out_lvl,
           c->immutable_cf_options()->compaction_style, base_level,
-          c->immutable_cf_options()->level_compaction_dynamic_level_bytes)));
-  int subcompactions =
-      std::min({max_usable_threads, static_cast<int>(ranges.size()),
-                static_cast<int>(c->max_subcompactions()),
-                static_cast<int>(max_output_files)});
+          c->immutable_cf_options()->level_compaction_dynamic_level_bytes));
 
-  if (subcompactions > 1) {
-    double mean = sum * 1.0 / subcompactions;
-    // Greedily add ranges to the subcompaction until the sum of the ranges'
-    // sizes becomes >= the expected mean size of a subcompaction
+  if (sum > target_range_size && subcompactions > 1) {
+    uint64_t cut_threshold = 2 * target_range_size / 5 * 4;
     sum = 0;
     for (size_t i = 0; i < ranges.size() - 1; i++) {
       sum += ranges[i].size;
@@ -964,7 +959,7 @@ void CompactionJob::GenSubcompactionBoundaries(int max_usable_threads) {
         // need to put an end boundary
         continue;
       }
-      if (sum >= mean) {
+      if (sum >= cut_threshold) {
         boundaries_.emplace_back(ExtractUserKey(ranges[i].range.limit));
         sizes_.emplace_back(sum);
         subcompactions--;
@@ -1145,7 +1140,6 @@ Status CompactionJob::Run() {
       sub_compact.status = std::move(result.status);
       s = sub_compact.status;
       if (s.ok()) {
-        sub_compact.stat_all = std::move(result.stat_all);
         for (auto& file_info : result.files) {
           uint64_t file_number = versions_->NewFileNumber();
           std::string fname = TableFileName(cfd->ioptions()->cf_paths,
@@ -2026,13 +2020,6 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
       SetPerfLevel(prev_perf_level);
     }
   }
-  if (auto filt = compaction_filter) {
-    ReapMatureAction(filt, &sub_compact->stat_all);
-  }
-  if (auto filt = second_pass_iter_storage.compaction_filter) {
-    EraseFutureAction(filt);
-  }
-
   sub_compact->c_iter.reset();
   input.reset();
   sub_compact->status = status;
@@ -2843,12 +2830,6 @@ Status CompactionJob::InstallCompactionResults(
 
   TablePropertiesCollection tp;
   for (const auto& state : compact_->sub_compact_states) {
-    compaction->transient_stat().push_back(TableTransientStat());
-    auto& tts = compaction->transient_stat().back();
-    tts.stat_all = state.stat_all;
-    ROCKS_LOG_INFO(db_options_.info_log, "[%s] [JOB %d] stat_all[len=%zd] = %s",
-                   compaction->column_family_data()->GetName().c_str(), job_id_,
-                   state.stat_all.size(), state.stat_all.c_str());
     for (const auto& output : state.outputs) {
       /*
       auto iter = output.table_properties->user_collected_properties.find(
@@ -3241,56 +3222,5 @@ void CompactionJob::LogCompaction() {
   }
 }
 
-static std::map<const void*, void (*)(const void* p_obj, std::string* result)>
-    g_fa_map;
-std::mutex g_fa_map_mutex;
-
-void PlantFutureAction(const void* obj,
-                       void (*action)(const void* p_obj, std::string* result)) {
-  assert(nullptr != obj);
-  assert(nullptr != action);
-  g_fa_map_mutex.lock();
-  auto ib = g_fa_map.insert({obj, action});
-  g_fa_map_mutex.unlock();
-  assert(ib.second);
-  if (!ib.second) {
-    abort();
-  }
-}
-
-bool EraseFutureAction(const void* obj) {
-  assert(nullptr != obj);
-  g_fa_map_mutex.lock();
-  size_t cnt = g_fa_map.erase(obj);
-  g_fa_map_mutex.unlock();
-  return cnt > 0;
-}
-
-bool ExistFutureAction(const void* obj) {
-  assert(nullptr != obj);
-  g_fa_map_mutex.lock();
-  auto end = g_fa_map.end();
-  auto iter = g_fa_map.find(obj);
-  bool exists = end != iter;
-  g_fa_map_mutex.unlock();
-  return exists;
-}
-
-bool ReapMatureAction(const void* obj, std::string* result) {
-  assert(nullptr != obj);
-  assert(nullptr != result);
-  g_fa_map_mutex.lock();
-  auto iter = g_fa_map.find(obj);
-  if (g_fa_map.end() != iter) {
-    auto action = std::move(iter->second);
-    g_fa_map.erase(iter);
-    g_fa_map_mutex.unlock();
-    action(obj, result);
-    return true;
-  } else {
-    g_fa_map_mutex.unlock();
-    return false;
-  }
-}
 
 }  // namespace TERARKDB_NAMESPACE

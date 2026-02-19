@@ -241,7 +241,7 @@ Status TerarkZipTableFactory::NewTableReader(
         size_t initial_file_num = 2048;
         cache_.reset(LruReadonlyCache::create(
             table_options_.cacheCapacityBytes, table_options_.cacheShards,
-            initial_file_num, table_reader_options.env_options.use_aio_reads));
+            initial_file_num));
       }
     }
   }
@@ -301,28 +301,28 @@ Status TerarkZipTableFactory::NewTableReader(
                           kTerarkZipTableOffsetBlock, &offsetBC);
   if (s.ok()) {
     TerarkZipMultiOffsetInfo info;
-    if (info.risk_set_memory(offsetBC.data.data(), offsetBC.data.size())) {
-      if (info.offset_.size() > 1) {
-        std::unique_ptr<TerarkZipTableMultiReader> t(
-            new TerarkZipTableMultiReader(this, table_reader_options,
-                                          table_options_));
-        s = t->Open(file.release(), file_size);
-        if (s.ok()) {
-          *table = std::move(t);
-        }
-      } else {
-        std::unique_ptr<TerarkZipTableReader> t(new TerarkZipTableReader(
-            this, table_reader_options, table_options_));
-        s = t->Open(file.release(), file_size);
-        if (s.ok()) {
-          *table = std::move(t);
-        }
-      }
-      info.risk_release_ownership();
-      return s;
+    if (!info.risk_set_memory(offsetBC.data.data(), offsetBC.data.size())) {
+      return Status::InvalidArgument("TerarkZipTableFactory::NewTableReader()",
+                                     "bad TerarkZipMultiOffsetInfo");
     }
-    return Status::InvalidArgument("TerarkZipTableFactory::NewTableReader()",
-                                   "bad TerarkZipMultiOffsetInfo");
+    TERARK_SCOPE_EXIT(info.risk_release_ownership());
+    if (info.offset_.size() > 1) {
+      std::unique_ptr<TerarkZipTableMultiReader> t(
+          new TerarkZipTableMultiReader(this, table_reader_options,
+                                        table_options_));
+      s = t->Open(file.release(), file_size);
+      if (s.ok()) {
+        *table = std::move(t);
+      }
+    } else {
+      std::unique_ptr<TerarkZipTableReader> t(new TerarkZipTableReader(
+          this, table_reader_options, table_options_));
+      s = t->Open(file.release(), file_size);
+      if (s.ok()) {
+        *table = std::move(t);
+      }
+    }
+    return s;
   }
   return Status::InvalidArgument("TerarkZipTableFactory::NewTableReader()",
                                  "missing TerarkZipMultiOffsetInfo");
@@ -395,7 +395,8 @@ TableBuilder* TerarkZipTableFactory::NewTableBuilder(
     g_lastTime = g_pf.now();
   }
   if (fallback_factory_) {
-    if (curlevel >= 0 && curlevel < minlevel) {
+    if ((curlevel >= 0 && curlevel < minlevel)
+        || table_options_.terarkZipMinLevel == kTerarkZipMinLevelForDisabled) {
       nth_new_fallback_table_++;
       TableBuilder* tb = fallback_factory_->NewTableBuilder(
           table_builder_options, column_family_id, file);

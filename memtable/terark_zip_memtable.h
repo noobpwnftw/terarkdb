@@ -49,33 +49,38 @@ typedef std::array<terark::MainPatricia*, 32> tries_t;
 
 enum class ConcurrentType { Native, None };
 
-enum class PatriciaKeyType { UserKey, FullKey };
-
 enum class InsertResult { Success, Duplicated, Fail };
+
+struct alignas(8) tag_vector_t {
+  std::atomic<uint64_t> size_loc;
+  static bool full(uint32_t size) { return !((size - 1) & size); }
+};
 
 #pragma pack(push)
 #pragma pack(4)
-struct tag_vector_t {
-  std::atomic<uint64_t> size_loc;
-  struct data_t {
-    uint64_t tag;
-    uint32_t loc;
-    operator uint64_t() const { return tag; }
-  };
-  static bool full(uint32_t size) { return !((size - 1) & size); }
+struct tag_data_t {
+  uint64_t tag;
+  uint32_t loc;
+  operator uint64_t() const { return tag; }
 };
 #pragma pack(pop)
+
+static_assert(sizeof(tag_vector_t) % terark::MainPatricia::AlignSize == 0, "tag_vector_t not unit aligned");
+static_assert(sizeof(tag_data_t) % terark::MainPatricia::AlignSize == 0, "tag_data_t not unit aligned");
+static_assert((terark::MainPatricia::AlignSize * 2) % alignof(tag_vector_t) == 0, "unit parity cannot represent tag_vector_t alignment");
+static_assert((sizeof(tag_data_t) + terark::MainPatricia::AlignSize) % alignof(tag_vector_t) == 0, "odd-unit start + tag_data_t must align tag_vector_t");
 
 }  // namespace terark_memtable_details
 
 // Patricia trie memtable rep
 class PatriciaTrieRep : public MemTableRep {
   terark::Patricia::ConcurrentLevel concurrent_level_;
-  terark_memtable_details::PatriciaKeyType patricia_key_type_;
   bool handle_duplicate_;
   std::atomic_bool immutable_;
   terark_memtable_details::tries_t trie_vec_;
-  size_t trie_vec_size_;
+  std::atomic<uint32_t> trie_vec_size_;
+  std::atomic<uint32_t> trie_inflight_writers_;
+  std::atomic_bool freeze_last_trie_;
   size_t overhead_;  // this overhead is for new memtable size check
   int64_t write_buffer_size_;
   static const int64_t size_limit_ = 1LL << 30;
@@ -84,7 +89,6 @@ class PatriciaTrieRep : public MemTableRep {
  public:
   // Create a new patricia trie memtable rep with following options
   PatriciaTrieRep(terark_memtable_details::ConcurrentType concurrent_type,
-                  terark_memtable_details::PatriciaKeyType patricia_key_type,
                   bool handle_duplicate, intptr_t write_buffer_size,
                   Allocator* allocator);
 
@@ -142,7 +146,7 @@ class PatriciaRepIterator : public MemTableRep::Iterator, boost::noncopyable {
 
     struct VectorData {
       size_t size;
-      const typename terark_memtable_details::tag_vector_t::data_t* data;
+      const typename terark_memtable_details::tag_data_t* data;
     };
 
     HeapItem(terark::Patricia* trie) : tag(uint64_t(-1)), index(size_t(-1)) {
@@ -211,7 +215,7 @@ class PatriciaRepIterator : public MemTableRep::Iterator, boost::noncopyable {
 
  public:
   PatriciaRepIterator(terark_memtable_details::tries_t& tries,
-                      size_t tries_size);
+                      uint32_t tries_size);
 
   virtual ~PatriciaRepIterator();
 
@@ -265,7 +269,6 @@ class PatriciaTrieRepFactory : public MemTableRepFactory {
  private:
   std::shared_ptr<class MemTableRepFactory> fallback_;
   terark_memtable_details::ConcurrentType concurrent_type_;
-  terark_memtable_details::PatriciaKeyType patricia_key_type_;
   int64_t write_buffer_size_;
 
  public:
@@ -273,12 +276,9 @@ class PatriciaTrieRepFactory : public MemTableRepFactory {
       std::shared_ptr<class MemTableRepFactory>& fallback,
       terark_memtable_details::ConcurrentType concurrent_type =
           terark_memtable_details::ConcurrentType::Native,
-      terark_memtable_details::PatriciaKeyType patricia_key_type =
-          terark_memtable_details::PatriciaKeyType::UserKey,
       int64_t write_buffer_size = 512LL * 1048576)
       : fallback_(fallback),
         concurrent_type_(concurrent_type),
-        patricia_key_type_(patricia_key_type),
         write_buffer_size_(write_buffer_size) {}
 
   virtual ~PatriciaTrieRepFactory() {}

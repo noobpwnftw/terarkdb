@@ -980,11 +980,13 @@ bool ColumnFamilyData::NeedsGarbageCollection() const {
 
 Compaction* ColumnFamilyData::PickCompaction(
     const MutableCFOptions& mutable_options,
-    const std::vector<SequenceNumber>& snapshots, LogBuffer* log_buffer) {
+    const std::vector<SequenceNumber>& snapshots, LogBuffer* log_buffer,
+    bool has_pending_manual) {
   StopWatch sw(ioptions_.env, ioptions_.statistics, PICK_COMPACTION_TIME);
   auto* result = compaction_picker_->PickCompaction(GetName(), mutable_options,
                                                     current_->storage_info(),
-                                                    snapshots, log_buffer);
+                                                    snapshots, log_buffer,
+                                                    has_pending_manual);
   if (result != nullptr) {
     result->SetInputVersion(current_);
     result->set_compaction_load(current_->GetCompactionLoad());

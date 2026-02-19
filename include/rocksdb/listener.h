@@ -241,21 +241,6 @@ struct FlushJobInfo {
   FlushReason flush_reason;
 };
 
-struct TableTransientStat {
-  // Same as user_collected_properties["User.Collected.Transient.Stat"].
-  // Should be transient and do not save to SST, but the code is too
-  // complex, so we DO SAVE it to SST, to avoid errors
-  // std::map<std::string, std::string> per_table;
-
-  std::string stat_all;
-};
-
-void PlantFutureAction(const void* obj,
-                       void (*action)(const void* p_obj, std::string* result));
-bool EraseFutureAction(const void* obj);
-bool ExistFutureAction(const void* obj);
-bool ReapMatureAction(const void* obj, std::string* result);
-
 struct CompactionJobInfo {
   CompactionJobInfo() = default;
   explicit CompactionJobInfo(const CompactionJobStats& _stats)
@@ -283,10 +268,6 @@ struct CompactionJobInfo {
   // Table properties for input and output tables.
   // The map is keyed by values from input_files and output_files.
   TablePropertiesCollection table_properties;
-
-  // transient user stat collected during compaction
-  // per sub compact
-  std::vector<TableTransientStat> transient_stat;
 
   // Reason to run the compaction
   CompactionReason compaction_reason;

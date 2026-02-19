@@ -25,7 +25,8 @@ class UniversalCompactionPicker : public CompactionPicker {
                              const MutableCFOptions& mutable_cf_options,
                              VersionStorageInfo* vstorage,
                              const std::vector<SequenceNumber>& snapshots,
-                             LogBuffer* log_buffer) override;
+                             LogBuffer* log_buffer,
+                             bool has_pending_manual) override;
 
   Compaction* CompactRange(
       const std::string& cf_name, const MutableCFOptions& mutable_cf_options,
@@ -69,7 +70,7 @@ class UniversalCompactionPicker : public CompactionPicker {
       const std::string& cf_name, const MutableCFOptions& mutable_cf_options,
       VersionStorageInfo* vstorage, double score,
       std::vector<SortedRun>* sorted_runs, size_t reduce_sorted_run_target,
-      LogBuffer* log_buffer);
+      unsigned int ratio, LogBuffer* log_buffer);
 
   // Used in universal compaction when the enabled_trivial_move
   // option is set. Checks whether there are any overlapping files

@@ -276,6 +276,7 @@ class TerarkZipTableMultiReader : public TerarkZipTableReaderBase {
     const TerarkZipSubReader* LowerBoundSubReaderReverse(fstring key) const;
     size_t IteratorSize() const { return iteratorSize_; }
     bool HasAnyZipOffset() const { return hasAnyZipOffset_; }
+    fstring GetBound(size_t i) const { return bounds_[i]; }
   };
 
  private:
