@@ -183,6 +183,8 @@ class TerarkZipTableBuilder : public TableBuilder, boost::noncopyable {
     size_t offset;
   };
   Status buildEntropyZipBlobStore(BuildStoreParams& params);
+  bool UseEntropyKV(const KeyValueStatus& kvs) const;
+  Status buildEntropyKVBlobStore(BuildStoreParams& params);
   Status buildZeroLengthBlobStore(BuildStoreParams& params);
   Status buildMixedLenBlobStore(BuildStoreParams& params);
   Status buildZipOffsetBlobStore(BuildStoreParams& params);

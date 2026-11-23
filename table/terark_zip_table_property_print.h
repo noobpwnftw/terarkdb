@@ -21,6 +21,10 @@
   M_Boolea(optimizeCpuL3Cache);
   M_Boolea(forceMetaInMemory);
   M_Boolea(enableEntropyStore);
+  M_Boolea(entropyKV);
+  M_Boolea(entropyKVReorder);
+  M_NumFmt(entropyKVKeyBytes        , "%u");
+  M_NumFmt(entropyKVValueBytes      , "%u");
   M_NumFmt(cbtHashBits              , "%d");
   M_NumFmt(minPreadLen              , "%d");
   M_NumFmt(offsetArrayBlockUnits    , "%d");

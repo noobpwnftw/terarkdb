@@ -12,6 +12,7 @@
 #include <terark/num_to_str.hpp>
 #include <terark/util/sortable_strvec.hpp>
 #include <terark/zbs/blob_store_file_header.hpp>
+#include <terark/zbs/entropy_kv_blob_store.hpp>
 #include <terark/zbs/entropy_zip_blob_store.hpp>
 #include <terark/zbs/mixed_len_blob_store.hpp>
 #include <terark/zbs/plain_blob_store.hpp>
@@ -956,7 +957,8 @@ Status TerarkZipTableBuilder::BuildStore(KeyValueStatus& kvs,
         s = buildZeroLengthBlobStore(params);
       } else if (stat.keyCount >= 4096 && table_options_.enableEntropyStore &&
                  kvs.status.valueHist.m_total_key_len / stat.keyCount < 32) {
-        s = buildEntropyZipBlobStore(params);
+        s = UseEntropyKV(kvs) ? buildEntropyKVBlobStore(params)
+                              : buildEntropyZipBlobStore(params);
       } else if (table_options_.offsetArrayBlockUnits) {
         if (variaNum * 64 < stat.keyCount) {
           s = buildMixedLenBlobStore(params);
@@ -1281,6 +1283,46 @@ Status TerarkZipTableBuilder::buildEntropyZipBlobStore(
       !table_options_.disableCompressDict);
   auto s =
       BuilderWriteValues(kvs, [&](fstring value) { builder.addRecord(value); });
+  if (s.ok()) {
+    builder.finish();
+  }
+  return s;
+}
+// EntropyKVBlobStore only gains on bare (zero sequence) values.
+bool TerarkZipTableBuilder::UseEntropyKV(const KeyValueStatus& kvs) const {
+  return table_options_.entropyKV &&
+         kvs.status.zeroSeqCount * 2 >= kvs.status.stat.keyCount;
+}
+Status TerarkZipTableBuilder::buildEntropyKVBlobStore(
+    BuildStoreParams& params) {
+  auto& kvs = params.kvs;
+  auto& hist = kvs.status.valueHist;
+  auto checksumType = (hist.m_total_key_len / hist.m_cnt_sum <
+                       static_cast<size_t>(table_options_.checksumSmallValSize))
+                          ? kCRC16C
+                          : kCRC32C;
+  size_t blockUnits = table_options_.offsetArrayBlockUnits != 0
+                          ? table_options_.offsetArrayBlockUnits
+                          : 128;
+  if (table_options_.entropyKVKeyBytes < 1 ||
+      table_options_.entropyKVKeyBytes > 4 ||
+      table_options_.entropyKVValueBytes < 1 ||
+      table_options_.entropyKVValueBytes > 4) {
+    return Status::InvalidArgument("TerarkZipTableBuilder:",
+                                   "entropyKV element bytes must be 1..4");
+  }
+  terark::EntropyKVBlobStore::Options opt;
+  opt.keyBytes = uint8_t(table_options_.entropyKVKeyBytes);
+  opt.valueBytes = uint8_t(table_options_.entropyKVValueBytes);
+  opt.reorder = table_options_.entropyKVReorder;
+  terark::EntropyKVBlobStore::MyBuilder builder(
+      opt, blockUnits, params.fpath, params.offset,
+      table_options_.checksumLevel, checksumType);
+  size_t recId = 0;
+  auto s = BuilderWriteValues(kvs, [&](fstring value) {
+    const bool bare = kvs.type[recId++] == size_t(ZipValueType::kZeroSeq);
+    builder.addRecord(value, bare);
+  });
   if (s.ok()) {
     builder.finish();
   }

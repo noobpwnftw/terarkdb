@@ -79,7 +79,12 @@ struct TerarkZipTableOptions {
   bool forceMetaInMemory = false;
   bool enableEntropyStore = true;
   uint8_t cbtHashBits = 0;
-  uint8_t reserveBytes0[5] = {};
+  /// Values are lists of entropyKVKeyBytes:entropyKVValueBytes elements: tables
+  /// of mostly bare values use EntropyKVBlobStore; with entropyKVReorder,
+  /// values read back sorted by element key.
+  bool entropyKV = false;
+  bool entropyKVReorder = false;
+  uint8_t reserveBytes[3] = {};
   uint16_t offsetArrayBlockUnits = 0;
 
   double sampleRatio = 0.03;
@@ -110,7 +115,8 @@ struct TerarkZipTableOptions {
   uint32_t cbtEntryPerTrie = 65536;
   uint32_t cbtMinKeySize = 16;
   double cbtMinKeyRatio = 0.5;
-  uint8_t reserveBytes1[8] = {};
+  uint32_t entropyKVKeyBytes = 2;  // see entropyKV
+  uint32_t entropyKVValueBytes = 2;
 
   class Status Parse(class Slice);
 };

@@ -562,6 +562,12 @@ std::unordered_map<std::string, OptionTypeInfo>
         {"enableEntropyStore",
          {offsetof(struct TerarkZipTableOptions, enableEntropyStore),
           OptionType::kBoolean, OptionVerificationType::kNormal, false, 0}},
+        {"entropyKV",
+         {offsetof(struct TerarkZipTableOptions, entropyKV),
+          OptionType::kBoolean, OptionVerificationType::kNormal, false, 0}},
+        {"entropyKVReorder",
+         {offsetof(struct TerarkZipTableOptions, entropyKVReorder),
+          OptionType::kBoolean, OptionVerificationType::kNormal, false, 0}},
         {"cbtHashBits",
          {offsetof(struct TerarkZipTableOptions, cbtHashBits),
           OptionType::kUInt, OptionVerificationType::kNormal, false, 0}},
@@ -594,6 +600,12 @@ std::unordered_map<std::string, OptionTypeInfo>
           OptionType::kUInt32T, OptionVerificationType::kNormal, false, 0}},
         {"keyPrefixLen",
          {offsetof(struct TerarkZipTableOptions, keyPrefixLen),
+          OptionType::kUInt32T, OptionVerificationType::kNormal, false, 0}},
+        {"entropyKVKeyBytes",
+         {offsetof(struct TerarkZipTableOptions, entropyKVKeyBytes),
+          OptionType::kUInt32T, OptionVerificationType::kNormal, false, 0}},
+        {"entropyKVValueBytes",
+         {offsetof(struct TerarkZipTableOptions, entropyKVValueBytes),
           OptionType::kUInt32T, OptionVerificationType::kNormal, false, 0}},
         {"singleIndexMinSize",
          {offsetof(struct TerarkZipTableOptions, singleIndexMinSize),
@@ -683,10 +695,18 @@ Status TerarkZipTableOptions::Parse(Slice opt) {
                                        "bad " #name);                     \
     }                                                                     \
   }
-  int entropyAlgo, cbtHashBits;
-  int debugLevel, indexNestScale, indexTempLevel, offsetArrayBlockUnits;
+  // Options missing from `opt` keep their values.
+  int entropyAlgo = this->entropyAlgo, cbtHashBits = this->cbtHashBits;
+  int debugLevel = this->debugLevel, indexNestScale = this->indexNestScale;
+  int indexTempLevel = this->indexTempLevel;
+  int offsetArrayBlockUnits = this->offsetArrayBlockUnits;
 #include "terark_zip_table_property_print.h"
 
+  if (entropyKVKeyBytes < 1 || entropyKVKeyBytes > 4 ||
+      entropyKVValueBytes < 1 || entropyKVValueBytes > 4) {
+    return Status::InvalidArgument("TerarkZipTableOptions::Parse():",
+                                   "entropyKV element bytes must be 1..4");
+  }
   this->debugLevel = (byte_t)debugLevel;
   this->indexNestScale = (byte_t)indexNestScale;
   this->indexTempLevel = (byte_t)indexTempLevel;

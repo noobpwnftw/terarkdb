@@ -297,6 +297,19 @@ bool TerarkZipCFOptionsFromEnv(ColumnFamilyOptions& cfo,
   if (const char* env = getenv("TerarkZipTable_indexType")) {
     tzo.indexType = env;
   }
+  if (const char* env = getenv("TerarkZipTable_entropyKVElement")) {
+    unsigned k = 0, v = 0;
+    if (sscanf(env, "%u:%u", &k, &v) == 2 && k >= 1 && k <= 4 && v >= 1 &&
+        v <= 4) {
+      tzo.entropyKVKeyBytes = k;
+      tzo.entropyKVValueBytes = v;
+    } else {
+      STD_WARN(
+          "bad env TerarkZipTable_entropyKVElement=%s, must be "
+          "keyBytes:valueBytes, each 1..4, keep %u:%u\n",
+          env, tzo.entropyKVKeyBytes, tzo.entropyKVValueBytes);
+    }
+  }
 
   MyOverrideInt(tzo, checksumLevel);
   MyOverrideInt(tzo, checksumSmallValSize);
@@ -332,6 +345,8 @@ bool TerarkZipCFOptionsFromEnv(ColumnFamilyOptions& cfo,
   MyOverrideBool(tzo, optimizeCpuL3Cache);
   MyOverrideBool(tzo, forceMetaInMemory);
   MyOverrideBool(tzo, enableEntropyStore);
+  MyOverrideBool(tzo, entropyKV);
+  MyOverrideBool(tzo, entropyKVReorder);
 
   MyOverrideDouble(tzo, sampleRatio);
   MyOverrideDouble(tzo, indexCacheRatio);
