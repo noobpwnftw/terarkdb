@@ -77,9 +77,8 @@ MemTable::MemTable(const InternalKeyComparator& cmp,
                  : nullptr,
              mutable_cf_options.memtable_huge_page_size),
       table_(mutable_cf_options.memtable_factory->CreateMemTableRep(
-          comparator_, needs_dup_key_check, &arena_,
-          mutable_cf_options.prefix_extractor.get(), ioptions.info_log,
-          column_family_id)),
+          comparator_, needs_dup_key_check, &arena_, ioptions,
+          mutable_cf_options, column_family_id)),
       range_del_table_(SkipListFactory().CreateMemTableRep(
           comparator_, needs_dup_key_check, &arena_, nullptr /* transform */,
           ioptions.info_log, column_family_id)),

@@ -82,7 +82,7 @@ class PatriciaTrieRep : public MemTableRep {
   std::atomic<uint32_t> trie_inflight_writers_;
   std::atomic_bool freeze_last_trie_;
   size_t overhead_;  // this overhead is for new memtable size check
-  int64_t write_buffer_size_;
+  int64_t write_buffer_size_;  // each trie's size
   static const int64_t size_limit_ = 1LL << 30;
   std::mutex mutex_;
 

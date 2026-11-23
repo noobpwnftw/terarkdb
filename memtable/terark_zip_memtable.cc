@@ -102,6 +102,7 @@ PatriciaTrieRep::PatriciaTrieRep(details::ConcurrentType concurrent_type,
     : MemTableRep(allocator) {
   immutable_ = false;
   handle_duplicate_ = handle_duplicate;
+  if (write_buffer_size > size_limit_) write_buffer_size = size_limit_;
   write_buffer_size_ = write_buffer_size;
   if (concurrent_type == details::ConcurrentType::Native)
     concurrent_level_ = terark::Patricia::MultiWriteMultiRead;
@@ -435,18 +436,17 @@ bool PatriciaTrieRep::InsertKeyValue(const Slice& internal_key,
       std::unique_lock<std::mutex> lock(mutex_);
       if (curr_trie_vec_size == trie_vec_size_.load(std::memory_order_relaxed)) {
         freeze_last_trie_.store(true, std::memory_order_release);
-        if (write_buffer_size_ > 0) {
-          if (write_buffer_size_ < size_limit_) write_buffer_size_ *= 2;
-          if (write_buffer_size_ > size_limit_) write_buffer_size_ = size_limit_;
+        int64_t trie_size = write_buffer_size_;
+        if (trie_size > 0) {  // larger only for an entry that needs it
           size_t bound = key.size() + VarintLength(value.size()) + value.size();
-          if (size_t(write_buffer_size_) < bound)
-            write_buffer_size_ = terark::align_up(std::min(bound + (16 << 20), size_t(-1) >> 1), 4096);
+          if (size_t(trie_size) < bound)
+            trie_size = terark::align_up(std::min(bound + (16 << 20), size_t(-1) >> 1), 4096);
         }
         while (trie_inflight_writers_.load(std::memory_order_acquire) != 0) {
           TERARKDB_NAMESPACE::port::AsmVolatilePause();
         }
         trie_vec_[curr_trie_vec_size] = new MainPatricia(
-            sizeof(uint32_t), write_buffer_size_, concurrent_level_);
+            sizeof(uint32_t), trie_size, concurrent_level_);
         trie_vec_size_.fetch_add(1, std::memory_order_relaxed);
         freeze_last_trie_.store(false, std::memory_order_release);
       }
@@ -853,8 +853,15 @@ MemTableRep* PatriciaTrieRepFactory::CreateMemTableRep(
     Allocator* allocator, const ImmutableCFOptions& ioptions,
     const MutableCFOptions& mutable_cf_options, uint32_t column_family_id) {
   if (IsForwardBytewiseComparator(key_cmp.icomparator()->user_comparator())) {
+    // Start at the write buffer size, so a full memtable stays one trie
+    // (a negative size is the virtual memory mode, kept as is).
+    int64_t trie_size = write_buffer_size_;
+    if (trie_size > 0) {
+      trie_size = std::max<int64_t>(
+          trie_size, int64_t(mutable_cf_options.write_buffer_size));
+    }
     return new PatriciaTrieRep(concurrent_type_, needs_dup_key_check,
-                               write_buffer_size_, allocator);
+                               trie_size, allocator);
   } else {
     return fallback_->CreateMemTableRep(key_cmp, needs_dup_key_check, allocator,
                                         ioptions, mutable_cf_options,
